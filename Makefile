@@ -12,7 +12,7 @@ ARM64_TARGET := aarch64-unknown-linux-gnu
 GINUX_ARM64 := target/$(ARM64_TARGET)/release/ginux
 PAYLOAD_ARM64 := target/$(ARM64_TARGET)/release/managed-payload
 
-.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build build-arm64 arch-smoke arch-smoke-arm64 gate1-aarch64-guest legacy-kernel-aarch64 check-name check test test-unit test-intercept test-runtime test-config test-domain test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-cgroup test-block test-network run-host run-systemd bench bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 clean
+.PHONY: doctor host-image-fetch host-image-verify host-boot-test image-helper-fetch image-prepare domain-image-fetch domain-image-verify domain-image-prepare systemd-image-fetch systemd-image-verify systemd-image-prepare test-image test-oci-image test-oci-layers test-vfs test-native-vfs image-cache-clean build build-arm64 arch-smoke arch-smoke-arm64 gate1-aarch64-guest native-aarch64-guest legacy-kernel-aarch64 check-name check test test-unit test-intercept test-runtime test-config test-domain test-process build-process-fixtures test-process-native test-devices test-kernel-views test-systemd test-systemd-live test-systemd-interactive test-cgroup test-block test-network run-host run-systemd bench bench-baseline bench-block bench-network demo-gate-1 demo-gate-2 demo-gate-3 demo-gate-4 demo-gate-5 demo-gate-6 demo-gate-7 demo-gate-8 demo-gate-9 demo-gate-9.5 clean
 
 doctor:
 	@./scripts/doctor.sh
@@ -75,6 +75,9 @@ build-arm64:
 
 gate1-aarch64-guest: build-arm64
 	@./scripts/gate1-aarch64-guest.sh
+
+native-aarch64-guest:
+	@./scripts/native-aarch64-guest.sh
 
 arch-smoke: build
 	@./scripts/arch-smoke.sh $(GINUX) x86_64

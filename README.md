@@ -182,10 +182,13 @@ architecture of the daemon. Native-supervision fixtures stay on `make build`
 because they are x86_64 assembly.
 
 `qemu-aarch64-static` on an x86_64 host cannot ptrace an aarch64 tracee.
-`make gate1-aarch64-guest` runs that payload under `qemu-system-aarch64`
-instead. Set `GINUX_AARCH64_KERNEL` to a Linux arm64 `Image` (the v9fs test
-harness publishes these on `kernel-v*` releases). The guest mounts the
-daemon and payload with virtio-9p, tag `hostshare`, at `/var/tmp`.
+`make gate1-aarch64-guest` runs that payload under `qemu-system-aarch64`.
+`make native-aarch64-guest` runs `ginux native` the same way: the fixture is
+`clone(SIGCHLD)` for process creation, `brk #0` for the breakpoint, and the
+virtual tid and PI-futex checks. Set `GINUX_AARCH64_KERNEL` to a Linux arm64
+`Image` (the v9fs test harness publishes these on `kernel-v*` releases). The
+guest mounts the daemon and fixture with virtio-9p, tag `hostshare`, at
+`/var/tmp`. The x86_64 `int $0x80` ABI rejection stays on `make test-process-native`.
 
 ## Legacy kernel
 
