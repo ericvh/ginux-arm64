@@ -9,15 +9,21 @@ permissions:
   contents: read
 
 jobs:
-  x86_64:
-    runs-on: ubuntu-24.04
+  static-and-unit:
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v5
-      - run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - run: brew install ripgrep
       - run: rustup component add clippy rustfmt
       - run: rustup target add x86_64-unknown-linux-gnu
       - run: make check
       - run: make test-unit
+
+  launch-integration:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - run: rustup target add x86_64-unknown-linux-gnu
       - run: make build build-launch-fixture build-process-fixtures build-gate1-fixture
       - run: sudo make test-launch
       - run: sudo make test-native-supervision
@@ -25,7 +31,7 @@ jobs:
       - run: sudo make test-gate1-setup
 
   aarch64:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v5
       - run: sudo apt-get update && sudo apt-get install -y qemu-user-static qemu-system-arm cpio
