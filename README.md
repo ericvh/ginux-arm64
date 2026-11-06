@@ -177,10 +177,15 @@ Domain mediation on aarch64 reads `PTRACE_GETREGSET` (`NT_PRSTATUS` and
 x86_64 numbers the contract already uses, then translates them back before a
 host syscall runs. `fork` has no aarch64 entry, so a traced `fork` cannot be
 restarted as a host `fork`; traced process creation is `clone`. The security
-interpreter still decodes x86_64 ELF. Fixture binaries that are x86_64
-assembly stay on `make build`. An aarch64 kernel is required to execute this
-mediation path; `qemu-aarch64-static` on an x86_64 host cannot ptrace an
-aarch64 tracee.
+interpreter still decodes x86_64 ELF. The gate 1 payload builds for the
+architecture of the daemon. Native-supervision fixtures stay on `make build`
+because they are x86_64 assembly.
+
+`qemu-aarch64-static` on an x86_64 host cannot ptrace an aarch64 tracee.
+`make gate1-aarch64-guest` runs that payload under `qemu-system-aarch64`
+instead. Set `GINUX_AARCH64_KERNEL` to a Linux arm64 `Image` (the v9fs test
+harness publishes these on `kernel-v*` releases). The guest mounts the
+daemon and payload with virtio-9p, tag `hostshare`, at `/var/tmp`.
 
 ## Legacy kernel
 
