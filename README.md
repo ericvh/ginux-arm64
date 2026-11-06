@@ -182,6 +182,23 @@ assembly stay on `make build`. An aarch64 kernel is required to execute this
 mediation path; `qemu-aarch64-static` on an x86_64 host cannot ptrace an
 aarch64 tracee.
 
+## Legacy kernel
+
+The x86_64 UEFI kernel is preserved on `bootable-kernel` at tag
+`bootable-kernel-final` (the same commit as upstream). Build and boot that
+tree with its own `make build` and `make run` (`qemu-system-x86_64`).
+
+The aarch64 virt entry in this tree is `legacy-kernel/`. It drops to EL1,
+prints on the virt PL011, and exits through semihosting:
+
+```sh
+rustup target add aarch64-unknown-none
+make legacy-kernel-aarch64
+```
+
+`make legacy-kernel-aarch64` expects the banner
+`ginux-legacy: aarch64 virt boot ok` from `qemu-system-aarch64 -machine virt`.
+
 Inspect the latest completed capability directly:
 
 ```sh
