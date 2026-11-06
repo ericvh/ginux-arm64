@@ -168,8 +168,16 @@ pub extern "C" fn rust_main() -> ! {
     }
     if pid == 0 {
         let path = b"/var/tmp/ginux\0";
-        let arg0 = b"/var/tmp/ginux\0".as_ptr();
-        let argv: [*const u8; 2] = [arg0, core::ptr::null()];
+        #[cfg(not(native_guest))]
+        let argv: [*const u8; 2] = [path.as_ptr(), core::ptr::null()];
+        #[cfg(native_guest)]
+        let argv: [*const u8; 5] = [
+            path.as_ptr(),
+            b"native\0".as_ptr(),
+            b"/var/tmp/native.toml\0".as_ptr(),
+            b"/var/tmp/root\0".as_ptr(),
+            core::ptr::null(),
+        ];
         let envp: [*const u8; 1] = [core::ptr::null()];
         let rc = unsafe { syscall3(SYS_EXECVE, path.as_ptr() as usize, argv.as_ptr() as usize, envp.as_ptr() as usize) };
         write_str("ptrace-init: execve=");
