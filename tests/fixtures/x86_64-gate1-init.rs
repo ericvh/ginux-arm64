@@ -89,7 +89,9 @@ unsafe fn syscall5(n: usize, a: usize, b: usize, c: usize, d: usize, e: usize) -
 }
 
 fn write_str(s: &str) {
-    unsafe { syscall3(SYS_WRITE, 1, s.as_ptr() as usize, s.len()); }
+    unsafe {
+        syscall3(SYS_WRITE, 1, s.as_ptr() as usize, s.len());
+    }
 }
 
 fn write_dec(mut n: isize) {
@@ -107,7 +109,9 @@ fn write_dec(mut n: isize) {
             break;
         }
     }
-    unsafe { syscall3(SYS_WRITE, 1, buf[i..].as_ptr() as usize, buf.len() - i); }
+    unsafe {
+        syscall3(SYS_WRITE, 1, buf[i..].as_ptr() as usize, buf.len() - i);
+    }
 }
 
 fn poweroff() -> ! {
@@ -122,7 +126,9 @@ fn mkdir(path: &str) {
     let mut buf = [0u8; 64];
     let bytes = path.as_bytes();
     buf[..bytes.len()].copy_from_slice(bytes);
-    unsafe { syscall3(SYS_MKDIRAT, AT_FDCWD, buf.as_ptr() as usize, 0o755); }
+    unsafe {
+        syscall3(SYS_MKDIRAT, AT_FDCWD, buf.as_ptr() as usize, 0o755);
+    }
 }
 
 fn mount(src: &str, target: &str, fstype: &str, data: Option<&str>) -> isize {
@@ -144,7 +150,16 @@ fn mount(src: &str, target: &str, fstype: &str, data: Option<&str>) -> isize {
     } else {
         0
     };
-    unsafe { syscall5(SYS_MOUNT, src_p as usize, tgt_p as usize, type_p as usize, 0, data_p) }
+    unsafe {
+        syscall5(
+            SYS_MOUNT,
+            src_p as usize,
+            tgt_p as usize,
+            type_p as usize,
+            0,
+            data_p,
+        )
+    }
 }
 
 #[no_mangle]
@@ -198,11 +213,21 @@ pub extern "C" fn rust_main() -> ! {
         write_str("ptrace-init: execve=");
         write_dec(rc);
         write_str("\n");
-        unsafe { syscall1(SYS_EXIT, 127); }
+        unsafe {
+            syscall1(SYS_EXIT, 127);
+        }
         loop {}
     }
     let mut status = 0i32;
-    let waited = unsafe { syscall4(SYS_WAIT4, pid as usize, &mut status as *mut i32 as usize, 0, 0) };
+    let waited = unsafe {
+        syscall4(
+            SYS_WAIT4,
+            pid as usize,
+            &mut status as *mut i32 as usize,
+            0,
+            0,
+        )
+    };
     write_str("ptrace-init: wait=");
     write_dec(waited);
     write_str(" status=");
