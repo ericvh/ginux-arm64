@@ -80,7 +80,7 @@ userspace tree from this branch.
 - Intended base: `cursor/arm64-domain-mediation-2b05`
 - Pull request: intended on https://github.com/ericvh/ginux-arm64
 - Planned commits: aarch64 virt boot entry, make target, and this gate.
-- Actual commits: pending
+- Actual commits: `56338132` Boot a legacy-kernel entry on qemu-system-aarch64.
 
 ## Review policy and outcome
 
