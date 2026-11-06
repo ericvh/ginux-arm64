@@ -3,7 +3,9 @@
 //! The x86_64 UEFI kernel remains on `bootable-kernel`. This binary is the
 //! EL1 kernel for the virt machine: drop from EL2, install exception vectors,
 //! identity-map RAM and the virt MMIO devices, enable the MMU, and take one
-//! ARM generic-timer interrupt through the GICv2 before exiting.
+//! ARM generic-timer interrupt through the GICv2. It then starts an EL0
+//! process. That process enters with `svc #0`, and the kernel dispatches
+//! the number in `x8`.
 
 #![no_std]
 #![no_main]
@@ -70,7 +72,10 @@ global_asm!(
     ".balign 128",
     "b sync_entry",
     ".balign 128",
-    "b sync_entry",
+    // Lower EL, AArch64, synchronous. EL0 svc lands here.
+    "b svc_entry",
+    ".balign 128",
+    "b irq_entry",
     ".balign 128",
     "b sync_entry",
     ".balign 128",
@@ -122,7 +127,67 @@ global_asm!(
     "ldp x2, x3, [sp, #16]",
     "ldp x0, x1, [sp, #0]",
     "add sp, sp, #256",
-    "eret"
+    "eret",
+    "svc_entry:",
+    "sub sp, sp, #256",
+    "stp x0, x1, [sp, #0]",
+    "stp x2, x3, [sp, #16]",
+    "stp x4, x5, [sp, #32]",
+    "stp x6, x7, [sp, #48]",
+    "stp x8, x9, [sp, #64]",
+    "stp x10, x11, [sp, #80]",
+    "stp x12, x13, [sp, #96]",
+    "stp x14, x15, [sp, #112]",
+    "stp x16, x17, [sp, #128]",
+    "stp x18, x19, [sp, #144]",
+    "stp x20, x21, [sp, #160]",
+    "stp x22, x23, [sp, #176]",
+    "stp x24, x25, [sp, #192]",
+    "stp x26, x27, [sp, #208]",
+    "stp x28, x29, [sp, #224]",
+    "str x30, [sp, #240]",
+    "mov x0, sp",
+    "bl rust_svc",
+    "cbz x0, process_done",
+    "msr elr_el1, x0",
+    "ldr x30, [sp, #240]",
+    "ldp x28, x29, [sp, #224]",
+    "ldp x26, x27, [sp, #208]",
+    "ldp x24, x25, [sp, #192]",
+    "ldp x22, x23, [sp, #176]",
+    "ldp x20, x21, [sp, #160]",
+    "ldp x18, x19, [sp, #144]",
+    "ldp x16, x17, [sp, #128]",
+    "ldp x14, x15, [sp, #112]",
+    "ldp x12, x13, [sp, #96]",
+    "ldp x10, x11, [sp, #80]",
+    "ldp x8, x9, [sp, #64]",
+    "ldp x6, x7, [sp, #48]",
+    "ldp x4, x5, [sp, #32]",
+    "ldp x2, x3, [sp, #16]",
+    "ldp x0, x1, [sp, #0]",
+    "add sp, sp, #256",
+    "eret",
+    "process_done:",
+    "bl rust_process_done",
+    "b ."
+);
+
+global_asm!(
+    ".section .usertext, \"ax\"",
+    ".global user_process",
+    "user_process:",
+    "mov x8, #64",
+    "adr x0, user_msg",
+    "mov x1, #(user_msg_end - user_msg)",
+    "svc #0",
+    "mov x8, #93",
+    "mov x0, #0",
+    "svc #0",
+    "b .",
+    "user_msg:",
+    ".ascii \"ginux-legacy: process-write ok\\n\"",
+    "user_msg_end:"
 );
 
 const UART_DR: *mut u32 = 0x0900_0000 as *mut u32;
@@ -143,6 +208,12 @@ struct PageTable([u64; 512]);
 
 static mut L1: PageTable = PageTable([0; 512]);
 static mut L2_DEVICES: PageTable = PageTable([0; 512]);
+static mut L2_RAM: PageTable = PageTable([0; 512]);
+
+unsafe extern "C" {
+    static user_process: u8;
+    static user_stack_top: u8;
+}
 
 #[panic_handler]
 fn panic(_info: &PanicInfo<'_>) -> ! {
@@ -175,10 +246,27 @@ extern "C" fn kernel_main() -> ! {
         boot_exit(1);
     }
     write_uart(b"ginux-legacy: timer-irq=1\n");
-    write_semihost(b"ginux-legacy: aarch64 virt boot ok\n\0");
-    write_semihost(b"ginux-legacy: mmu=on\n\0");
-    write_semihost(b"ginux-legacy: timer-irq=1\n\0");
-    boot_exit(0)
+    unsafe {
+        asm!("msr daifset, #2", options(nomem, nostack));
+        start_process();
+    }
+}
+
+unsafe fn start_process() -> ! {
+    write_uart(b"ginux-legacy: process=started\n");
+    let pc = core::ptr::addr_of!(user_process) as u64;
+    let sp = core::ptr::addr_of!(user_stack_top) as u64;
+    asm!(
+        "msr sp_el0, {sp}",
+        "msr elr_el1, {pc}",
+        "msr spsr_el1, {spsr}",
+        "eret",
+        sp = in(reg) sp,
+        pc = in(reg) pc,
+        // EL0t with DAIF masked. The process reaches the kernel through svc.
+        spsr = in(reg) 0x3c0u64,
+        options(noreturn)
+    );
 }
 
 #[no_mangle]
@@ -194,6 +282,76 @@ extern "C" fn rust_irq() {
             write32(GICC + 0x10, iar);
         }
     }
+}
+
+#[no_mangle]
+extern "C" fn rust_svc(frame: *mut u64) -> u64 {
+    let esr: u64;
+    let elr: u64;
+    unsafe {
+        asm!("mrs {v}, esr_el1", v = out(reg) esr, options(nomem, nostack));
+        asm!("mrs {v}, elr_el1", v = out(reg) elr, options(nomem, nostack));
+    }
+    let class = (esr >> 26) & 0x3f;
+    if class != 0x15 || esr & 0xffff != 0 {
+        write_uart(b"ginux-legacy: svc=not-svc esr=");
+        write_hex(esr);
+        write_uart(b"\n");
+        boot_exit(1);
+    }
+    let number = unsafe { frame.add(8).read() };
+    match number {
+        64 => {
+            write_uart(b"ginux-legacy: svc=dispatch nr=64\n");
+            let ptr = unsafe { frame.read() };
+            let len = unsafe { frame.add(1).read() };
+            let Some(bytes) = user_bytes(ptr, len) else {
+                write_uart(b"ginux-legacy: svc=bad-pointer\n");
+                boot_exit(1);
+            };
+            write_uart(bytes);
+            unsafe { frame.write(len) };
+            // SVC records the next instruction in ELR, unlike a breakpoint.
+            elr
+        }
+        93 => {
+            write_uart(b"ginux-legacy: svc=dispatch nr=93\n");
+            0
+        }
+        _ => {
+            write_uart(b"ginux-legacy: svc=unknown nr=");
+            write_hex(number);
+            write_uart(b"\n");
+            unsafe { frame.write((-38i64) as u64) };
+            elr
+        }
+    }
+}
+
+fn user_bytes(ptr: u64, len: u64) -> Option<&'static [u8]> {
+    if len == 0 || len > 128 {
+        return None;
+    }
+    let end = ptr.checked_add(len)?;
+    let text = ptr >= 0x4020_0000 && end <= 0x4040_0000;
+    let stack = ptr >= 0x4040_0000 && end <= 0x4060_0000;
+    if !text && !stack {
+        return None;
+    }
+    Some(unsafe { core::slice::from_raw_parts(ptr as *const u8, len as usize) })
+}
+
+#[no_mangle]
+extern "C" fn rust_process_done() -> ! {
+    write_uart(b"ginux-legacy: process=exited\n");
+    write_semihost(b"ginux-legacy: aarch64 virt boot ok\n\0");
+    write_semihost(b"ginux-legacy: mmu=on\n\0");
+    write_semihost(b"ginux-legacy: timer-irq=1\n\0");
+    write_semihost(b"ginux-legacy: process=started\n\0");
+    write_semihost(b"ginux-legacy: svc=dispatch nr=64\n\0");
+    write_semihost(b"ginux-legacy: svc=dispatch nr=93\n\0");
+    write_semihost(b"ginux-legacy: process=exited\n\0");
+    boot_exit(0)
 }
 
 #[no_mangle]
@@ -222,36 +380,58 @@ unsafe fn install_vectors() {
 }
 
 unsafe fn map_identity() {
-    let l2 = core::ptr::addr_of_mut!(L2_DEVICES) as u64;
+    let devices = core::ptr::addr_of_mut!(L2_DEVICES) as u64;
+    let ram = core::ptr::addr_of_mut!(L2_RAM) as u64;
     let l1 = core::ptr::addr_of_mut!(L1).cast::<u64>();
-    // First gigabyte is a table of 2MB device blocks (GIC, PL011).
-    l1.write(table_descriptor(l2));
-    // RAM on the virt machine starts at 0x40000000. One normal 1GB block
-    // covers the kernel, its stack, and the page tables.
-    l1.add(1).write(block_descriptor(0x4000_0000, false));
+    l1.write(table_descriptor(devices));
+    // RAM starts at 0x40000000. Split it into 2MB blocks so EL0 can execute
+    // only its own text and can write only its own stack.
+    l1.add(1).write(table_descriptor(ram));
     let devices = core::ptr::addr_of_mut!(L2_DEVICES).cast::<u64>();
-    // 0x08000000 and 0x09000000 are distinct 2MB frames.
     devices
         .add(0x0800_0000 >> 21)
-        .write(block_descriptor(0x0800_0000, true));
+        .write(block_descriptor(0x0800_0000, Map::Device));
     devices
         .add(0x0900_0000 >> 21)
-        .write(block_descriptor(0x0900_0000, true));
+        .write(block_descriptor(0x0900_0000, Map::Device));
+    let ram = core::ptr::addr_of_mut!(L2_RAM).cast::<u64>();
+    ram.write(block_descriptor(0x4000_0000, Map::Kernel));
+    ram.add(1)
+        .write(block_descriptor(0x4020_0000, Map::UserCode));
+    ram.add(2)
+        .write(block_descriptor(0x4040_0000, Map::UserData));
+}
+
+enum Map {
+    Device,
+    Kernel,
+    UserCode,
+    UserData,
 }
 
 fn table_descriptor(next: u64) -> u64 {
     (next & 0x0000_ffff_ffff_f000) | 0b11
 }
 
-fn block_descriptor(phys: u64, device: bool) -> u64 {
-    let attr = if device { 1u64 << 2 } else { 0 };
-    let share = if device { 0 } else { 3u64 << 8 };
-    let exec_never = if device {
-        (1u64 << 53) | (1u64 << 54)
-    } else {
-        0
+fn block_descriptor(phys: u64, map: Map) -> u64 {
+    let (attr, share, access, exec_never) = match map {
+        // EL1 only. Device memory is never executable.
+        Map::Device => (1u64 << 2, 0, 0, (1u64 << 53) | (1u64 << 54)),
+        // EL1 code and data. EL0 has no access.
+        Map::Kernel => (0, 3u64 << 8, 0, 1u64 << 54),
+        // EL0 may read and execute. EL1 may read the process text.
+        Map::UserCode => (0, 3u64 << 8, 3u64 << 6, 1u64 << 53),
+        // EL0 stack. Neither side executes it.
+        Map::UserData => (0, 3u64 << 8, 1u64 << 6, (1u64 << 53) | (1u64 << 54)),
     };
-    (phys & 0x0000_ffff_ffe0_0000) | attr | (1 << 5) | share | (1 << 10) | exec_never | 0b01
+    (phys & 0x0000_ffff_ffe0_0000)
+        | attr
+        | (1 << 5)
+        | access
+        | share
+        | (1 << 10)
+        | exec_never
+        | 0b01
 }
 
 unsafe fn enable_mmu() {
