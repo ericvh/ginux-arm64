@@ -191,7 +191,9 @@ they are x86_64 assembly.
 `make gate1-aarch64-guest` runs that payload under `qemu-system-aarch64`.
 `make native-aarch64-guest` runs `ginux native` the same way: the fixture is
 `clone(SIGCHLD)` for process creation, `brk #0` for the breakpoint, and the
-virtual tid and PI-futex checks. Set `GINUX_AARCH64_KERNEL` to a Linux arm64
+virtual tid and PI-futex checks. A tracee's own `brk #0` is stepped over so
+the following syscall stays supervised; the fork-parent breakpoint is still
+restored and translated. Set `GINUX_AARCH64_KERNEL` to a Linux arm64
 `Image` (the v9fs test harness publishes these on `kernel-v*` releases). The
 guest mounts the daemon and fixture with virtio-9p, tag `hostshare`, at
 `/var/tmp`. The x86_64 `int $0x80` ABI rejection stays on `make test-process-native`.
