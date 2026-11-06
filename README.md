@@ -177,8 +177,10 @@ Domain mediation on aarch64 reads `PTRACE_GETREGSET` (`NT_PRSTATUS` and
 x86_64 numbers the contract already uses, then translates them back before a
 host syscall runs. `fork` has no aarch64 entry, so a traced `fork` cannot be
 restarted as a host `fork`; traced process creation is `clone`. The security
-interpreter still decodes x86_64 ELF. The gate 1 payload builds for the
-architecture of the daemon. Native-supervision fixtures stay on `make build`
+`ginux runtime` loads ELF64 for x86_64 and for aarch64. An aarch64 `_start`
+must be 4-byte aligned, and `svc #0` is the syscall the loader catches.
+`make gate1-aarch64-guest` loads that ELF and requires `GATE1: PASS`. The
+x86_64 decoder is unchanged. Native-supervision fixtures stay on `make build`
 because they are x86_64 assembly.
 
 `qemu-aarch64-static` on an x86_64 host cannot ptrace an aarch64 tracee.
