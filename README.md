@@ -204,7 +204,9 @@ The x86_64 UEFI kernel is preserved on `bootable-kernel` at tag
 `bootable-kernel-final` (the same commit as upstream). Build and boot that
 tree with its own `make build` and `make run` (`qemu-system-x86_64`).
 
-The aarch64 virt entry in this tree is `legacy-kernel/`. It drops to EL1,
+The aarch64 virt kernel in this tree is `legacy-kernel/`. It drops to EL1,
+installs exception vectors, identity-maps RAM and the virt MMIO frame,
+enables the MMU, takes one ARM generic-timer interrupt through the GICv2,
 prints on the virt PL011, and exits through semihosting:
 
 ```sh
