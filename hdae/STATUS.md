@@ -2,11 +2,10 @@
 
 ## Current checkpoint
 
-- Active fork work is the arm64 port authorized on 2026-11-06. Gate 15
-  (userspace daemon) and gate 16 (domain mediation) are technically passed
-  and awaiting human review of their pull requests. Gate 17 (legacy kernel)
-  is next in the authorized batch. Gates 9.75, 10, 11, and 13 remain the
-  upstream product sequence and have not been started by this port.
+- Active fork work is the arm64 port authorized on 2026-11-06. Gates 15,
+  16, and 17 are technically passed and awaiting human review of their pull
+  requests. Gates 9.75, 10, 11, and 13 remain the upstream product sequence
+  and have not been started by this port.
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
   architecture. Pull request https://github.com/gmkurtzer/ginux-us/pull/1 was
   merged by the human on 2026-11-04.
@@ -80,9 +79,9 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: 16, technically passed, pull request pending human review.
-  The authorized batch continues at gate 17. Gate 9.75 remains the next
-  upstream product checkpoint and is not the active fork task.
+- Active gate: 17, technically passed, pull request pending human review.
+  The authorized arm64 batch has no further stage. Gate 9.75 remains the
+  next upstream product checkpoint and is not the active fork task.
 - Last evidence: `make test-systemd-interactive` passed from a clean isolated
   overlay with `ps -ef` at 309 ms, `top -b -n 1` at 913 ms, and valid Bash
   timing fields, plus cold acquisition, offline cache reuse, retained domain
@@ -389,20 +388,17 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Start gate 17 from this branch: bring upstream `bootable-kernel` /
-`bootable-kernel-final` into the fork without dropping the userspace tree,
-and port that legacy kernel to `qemu-system-aarch64`. Open its pull request
-when it builds. Upstream gate 9.75 stays queued and is not this fork's next
-edit.
+Wait for human review of the three arm64 pull requests. Upstream gate 9.75
+stays queued and is not this fork's next edit.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: 16, technically passed. Gate 17 is the next authorized fork
-  stage. Gate 9.75 remains the next upstream product checkpoint and has not
-  started.
+- Active gate: 17, technically passed. The arm64 batch is complete pending
+  human review. Gate 9.75 remains the next upstream product checkpoint and
+  has not started.
 - Last evidence: `make demo-gate-9.5`, `make test-systemd-interactive`,
   `make test-systemd`, `make test`, and `make check` passed. The isolated
   interactive run measured `ps -ef` at 309 ms and `top -b -n 1` at 913 ms,

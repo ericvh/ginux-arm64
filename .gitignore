@@ -1,5 +1,6 @@
 /build/
 /target/
+/legacy-kernel/target/
 /output/
 /docs/paper/*.blg
 /docs/paper/*.log
