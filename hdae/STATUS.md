@@ -4,8 +4,11 @@
 
 - Active fork work is the arm64 port authorized on 2026-11-06. Gates 15,
   16, and 17 are technically passed and awaiting human review of their pull
-  requests. Gates 9.75, 10, 11, and 13 remain the upstream product sequence
-  and have not been started by this port.
+  requests. The x86_64 gate 1 guest and the aarch64 native `brk #0` fix are
+  stacked above that port. The virt kernel now enables the MMU and takes a
+  timer interrupt; it is not a port of the x86_64 UEFI kernel. Gates 9.75,
+  10, 11, and 13 remain the upstream product sequence and have not been
+  started by this port.
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
   architecture. Pull request https://github.com/gmkurtzer/ginux-us/pull/1 was
   merged by the human on 2026-11-04.
@@ -79,9 +82,10 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: 17, technically passed, pull request pending human review.
-  The authorized arm64 batch has no further stage. Gate 9.75 remains the
-  next upstream product checkpoint and is not the active fork task.
+- Active gate: the virt kernel past the print-and-exit stub, stacked on
+  the aarch64 native `brk` fix. Gate 17 remains technically passed and
+  awaiting human review. Gate 9.75 remains the next upstream product
+  checkpoint and is not the active fork task.
 - Last evidence: `make test-systemd-interactive` passed from a clean isolated
   overlay with `ps -ef` at 309 ms, `top -b -n 1` at 913 ms, and valid Bash
   timing fields, plus cold acquisition, offline cache reuse, retained domain

@@ -30,6 +30,14 @@ if ! grep -q "ginux-legacy: aarch64 virt boot ok" "$log"; then
     echo "legacy aarch64 kernel did not print its boot banner" >&2
     exit 1
 fi
+if ! grep -q "ginux-legacy: mmu=on" "$log"; then
+    echo "legacy aarch64 kernel did not enable the MMU" >&2
+    exit 1
+fi
+if ! grep -q "ginux-legacy: timer-irq=1" "$log"; then
+    echo "legacy aarch64 kernel did not take a timer interrupt" >&2
+    exit 1
+fi
 if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
     echo "qemu-system-aarch64 exited $status" >&2
     exit "$status"
