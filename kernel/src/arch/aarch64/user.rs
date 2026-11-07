@@ -21,11 +21,16 @@ const PT_LOAD: u32 = 1;
 const PF_EXECUTE: u32 = 1;
 const PF_WRITE: u32 = 2;
 
+const ENOENT: i64 = -2;
 const EIO: i64 = -5;
 const EBADF: i64 = -9;
 const ENOMEM: i64 = -12;
 const EFAULT: i64 = -14;
 const EINVAL: i64 = -22;
+
+const AT_FDCWD: u64 = (-100_i64) as u64;
+const DISK_FD: u64 = 3;
+const DISK_PATH: &[u8] = b"/dev/vda";
 
 #[derive(Clone, Copy)]
 struct Page {
@@ -48,6 +53,8 @@ struct State {
     page_count: usize,
     break_addr: u64,
     mmap_next: u64,
+    disk_open: bool,
+    disk_pos: u64,
 }
 
 static mut STATE: Option<State> = None;
@@ -129,6 +136,8 @@ pub(crate) fn load(
             page_count,
             break_addr,
             mmap_next: MMAP_BASE,
+            disk_open: false,
+            disk_pos: 0,
         });
     }
     uart::write(b"ginux: controller elf loaded\r\n");
@@ -141,7 +150,81 @@ pub(crate) fn load(
     })
 }
 
+pub(crate) fn openat(dirfd: u64, path: u64) -> i64 {
+    if dirfd != AT_FDCWD {
+        return EBADF;
+    }
+    if !virtio::ready() {
+        return EIO;
+    }
+    match path_eq(path, DISK_PATH) {
+        Err(errno) => errno,
+        Ok(false) => ENOENT,
+        Ok(true) => {
+            let Some(state) = state() else {
+                return EIO;
+            };
+            state.disk_open = true;
+            state.disk_pos = 0;
+            DISK_FD as i64
+        }
+    }
+}
+
+pub(crate) fn close(fd: u64) -> i64 {
+    if fd == DISK_FD && disk_open() {
+        if let Some(state) = state() {
+            state.disk_open = false;
+        }
+        return 0;
+    }
+    EBADF
+}
+
+pub(crate) fn lseek(fd: u64, offset: u64, whence: u64) -> i64 {
+    if fd != DISK_FD || !disk_open() {
+        return EBADF;
+    }
+    let end = virtio::capacity_sectors().saturating_mul(SECTOR);
+    let next = match whence {
+        0 => offset as i64,
+        1 => match (disk_pos() as i64).checked_add(offset as i64) {
+            Some(value) => value,
+            None => return EINVAL,
+        },
+        2 => match (end as i64).checked_add(offset as i64) {
+            Some(value) => value,
+            None => return EINVAL,
+        },
+        _ => return EINVAL,
+    };
+    if next < 0 || next as u64 > end {
+        return EINVAL;
+    }
+    if let Some(state) = state() {
+        state.disk_pos = next as u64;
+    }
+    next
+}
+
+pub(crate) fn pread(fd: u64, pointer: u64, length: u64, offset: u64) -> i64 {
+    if fd != DISK_FD {
+        return EBADF;
+    }
+    block_read(pointer, length, offset, false)
+}
+
+pub(crate) fn pwrite(fd: u64, pointer: u64, length: u64, offset: u64) -> i64 {
+    if fd != DISK_FD {
+        return EBADF;
+    }
+    block_write(pointer, length, offset, false)
+}
+
 pub(crate) fn write(fd: u64, pointer: u64, length: u64) -> i64 {
+    if fd == DISK_FD {
+        return block_write(pointer, length, disk_pos(), true);
+    }
     if fd != 1 {
         return EBADF;
     }
@@ -167,6 +250,9 @@ pub(crate) fn write(fd: u64, pointer: u64, length: u64) -> i64 {
 }
 
 pub(crate) fn read(fd: u64, pointer: u64, length: u64) -> i64 {
+    if fd == DISK_FD {
+        return block_read(pointer, length, disk_pos(), true);
+    }
     if fd != 0 {
         return EBADF;
     }
@@ -186,6 +272,100 @@ pub(crate) fn read(fd: u64, pointer: u64, length: u64) -> i64 {
     }
     unsafe {
         core::ptr::copy_nonoverlapping(data.as_ptr(), pointer as *mut u8, size);
+    }
+    size as i64
+}
+
+const SECTOR: u64 = 512;
+
+fn disk_open() -> bool {
+    state().is_some_and(|state| state.disk_open)
+}
+
+fn disk_pos() -> u64 {
+    state().map(|state| state.disk_pos).unwrap_or(0)
+}
+
+fn path_eq(pointer: u64, expected: &[u8]) -> Result<bool, i64> {
+    if expected.len() + 1 > 64 {
+        return Err(EINVAL);
+    }
+    let mut buffer = [0_u8; 64];
+    let length = expected.len() + 1;
+    if !read_bytes(pointer, &mut buffer[..length]) {
+        return Err(EFAULT);
+    }
+    Ok(&buffer[..expected.len()] == expected && buffer[expected.len()] == 0)
+}
+
+fn block_span(offset: u64, length: u64) -> Result<Option<(u64, usize, usize)>, i64> {
+    let end = virtio::capacity_sectors().saturating_mul(SECTOR);
+    if offset > end {
+        return Err(EINVAL);
+    }
+    if offset == end || length == 0 {
+        return Ok(None);
+    }
+    let sector = offset / SECTOR;
+    let skip = (offset % SECTOR) as usize;
+    let room = SECTOR as usize - skip;
+    let size = (length as usize).min(room).min(MAX_WRITE);
+    Ok(Some((sector, skip, size)))
+}
+
+fn block_read(pointer: u64, length: u64, offset: u64, update: bool) -> i64 {
+    if !disk_open() {
+        return EBADF;
+    }
+    let Some((sector, skip, size)) = (match block_span(offset, length) {
+        Ok(span) => span,
+        Err(errno) => return errno,
+    }) else {
+        return 0;
+    };
+    let mut sector_buf = [0_u8; 512];
+    if !virtio::sector_io(sector, false, &mut sector_buf) {
+        return EIO;
+    }
+    let Some(state) = state() else {
+        return EFAULT;
+    };
+    if !covers(state, pointer, size as u64) {
+        return EFAULT;
+    }
+    unsafe {
+        core::ptr::copy_nonoverlapping(sector_buf[skip..].as_ptr(), pointer as *mut u8, size);
+    }
+    if update {
+        state.disk_pos = offset + size as u64;
+    }
+    size as i64
+}
+
+fn block_write(pointer: u64, length: u64, offset: u64, update: bool) -> i64 {
+    if !disk_open() {
+        return EBADF;
+    }
+    let Some((sector, skip, size)) = (match block_span(offset, length) {
+        Ok(span) => span,
+        Err(errno) => return errno,
+    }) else {
+        return EINVAL;
+    };
+    let mut sector_buf = [0_u8; 512];
+    if !virtio::sector_io(sector, false, &mut sector_buf) {
+        return EIO;
+    }
+    if !read_bytes(pointer, &mut sector_buf[skip..skip + size]) {
+        return EFAULT;
+    }
+    if !virtio::sector_io(sector, true, &mut sector_buf) {
+        return EIO;
+    }
+    if update {
+        if let Some(state) = state() {
+            state.disk_pos = offset + size as u64;
+        }
     }
     size as i64
 }

@@ -17,8 +17,19 @@ const VIRTIO_F_VERSION_1: u32 = 1;
 const DESC_NEXT: u16 = 1;
 const DESC_WRITE: u16 = 2;
 
+struct Live {
+    request: u64,
+    desc: u64,
+    avail: u64,
+    used: u64,
+    notify: u64,
+    capacity: u64,
+    avail_idx: u16,
+}
+
 static mut SECTOR: [u8; SECTOR_BYTES] = [0; SECTOR_BYTES];
 static mut READY: bool = false;
+static mut LIVE: Option<Live> = None;
 
 pub(crate) fn block_bytes() -> &'static [u8] {
     unsafe {
@@ -28,6 +39,98 @@ pub(crate) fn block_bytes() -> &'static [u8] {
             &[]
         }
     }
+}
+
+pub(crate) fn ready() -> bool {
+    unsafe { READY }
+}
+
+pub(crate) fn capacity_sectors() -> u64 {
+    unsafe { LIVE.as_ref().map(|live| live.capacity).unwrap_or(0) }
+}
+
+pub(crate) fn sector_io(sector: u64, write: bool, data: &mut [u8]) -> bool {
+    if data.len() != SECTOR_BYTES {
+        return false;
+    }
+    let Some(live) = (unsafe { LIVE.as_mut() }) else {
+        return false;
+    };
+    if sector >= live.capacity {
+        uart::write(b"ginux: virtio-blk sector past end\r\n");
+        return false;
+    }
+    let request = live.request;
+    let desc = live.desc;
+    let avail = live.avail;
+    let used = live.used;
+    let notify = live.notify;
+    mmio_write32(request, if write { 1 } else { 0 });
+    mmio_write32(request + 4, 0);
+    write_u64(request + 8, sector);
+    unsafe { ((request + 0x210) as *mut u8).write_volatile(0xff) };
+    let flags = if write {
+        DESC_NEXT
+    } else {
+        DESC_NEXT | DESC_WRITE
+    };
+    write_desc(desc, 1, request + 0x10, SECTOR_BYTES as u32, flags, 2);
+    if write {
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                data.as_ptr(),
+                (request + 0x10) as *mut u8,
+                SECTOR_BYTES,
+            );
+        }
+    }
+    let slot = usize::from(live.avail_idx % QUEUE_SIZE);
+    let next = live.avail_idx.wrapping_add(1);
+    unsafe {
+        (avail as *mut u16).add(2 + slot).write_volatile(0);
+    }
+    fence();
+    unsafe { (avail as *mut u16).add(1).write_volatile(next) };
+    live.avail_idx = next;
+    clean(desc, 4096);
+    clean(avail, 4096);
+    clean(request, 0x220);
+    fence();
+    mmio_write16(notify, 0);
+    fence();
+    let used_idx = (used + 2) as *const u16;
+    let mut done = false;
+    for _ in 0..2_000_000 {
+        fence();
+        if unsafe { used_idx.read_volatile() } == next {
+            done = true;
+            break;
+        }
+        core::hint::spin_loop();
+    }
+    if !done {
+        uart::write(b"ginux: virtio-blk request pending\r\n");
+        return false;
+    }
+    clean(request + 0x10, 513);
+    fence();
+    let status = unsafe { ((request + 0x210) as *const u8).read_volatile() };
+    if status != 0 {
+        uart::write(b"ginux: virtio-blk status ");
+        uart::write_u64(u64::from(status));
+        uart::write(b"\r\n");
+        return false;
+    }
+    if !write {
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                (request + 0x10) as *const u8,
+                data.as_mut_ptr(),
+                SECTOR_BYTES,
+            );
+        }
+    }
+    true
 }
 
 pub(crate) fn drive_block(
@@ -78,15 +181,20 @@ pub(crate) fn drive_block(
     if !setup(common, notify, caps.notify_multiplier, device_cfg, frames) {
         return false;
     }
+    let mut sector = [0_u8; SECTOR_BYTES];
+    if !sector_io(0, false, &mut sector) {
+        return false;
+    }
+    if sector.get(..MARK.len()) != Some(MARK) {
+        uart::write(b"ginux: virtio-blk sector mismatch ");
+        let mut word = [0_u8; 8];
+        word.copy_from_slice(&sector[..8]);
+        uart::write_hex(u64::from_le_bytes(word));
+        uart::write(b"\r\n");
+        return false;
+    }
     unsafe {
-        if SECTOR.get(..MARK.len()) != Some(MARK) {
-            uart::write(b"ginux: virtio-blk sector mismatch ");
-            let mut word = [0_u8; 8];
-            word.copy_from_slice(&SECTOR[..8]);
-            uart::write_hex(u64::from_le_bytes(word));
-            uart::write(b"\r\n");
-            return false;
-        }
+        SECTOR = sector;
         READY = true;
     }
     uart::write(b"ginux: virtio-blk read ok\r\n");
@@ -166,41 +274,23 @@ fn setup(common: u64, notify: u64, multiplier: u32, device_cfg: u64, frames: &mu
     );
     fence();
     let capacity = read_u64(device_cfg);
+    if capacity == 0 {
+        uart::write(b"ginux: virtio-blk capacity missing\r\n");
+        return false;
+    }
     uart::write(b"ginux: virtio-blk capacity ");
     uart::write_u64(capacity);
     uart::write(b"\r\n");
-    let notify_addr = notify + notify_off * u64::from(multiplier);
-    mmio_write16(notify_addr, 0);
-    fence();
-    let used_idx = (used + 2) as *const u16;
-    let mut done = false;
-    for _ in 0..2_000_000 {
-        fence();
-        if unsafe { used_idx.read_volatile() } != 0 {
-            done = true;
-            break;
-        }
-        core::hint::spin_loop();
-    }
-    if !done {
-        uart::write(b"ginux: virtio-blk request pending\r\n");
-        return false;
-    }
-    clean(request + 0x10, 512);
-    fence();
-    let status = unsafe { ((request + 0x210) as *const u8).read_volatile() };
-    if status != 0 {
-        uart::write(b"ginux: virtio-blk status ");
-        uart::write_u64(u64::from(status));
-        uart::write(b"\r\n");
-        return false;
-    }
     unsafe {
-        core::ptr::copy_nonoverlapping(
-            (request + 0x10) as *const u8,
-            SECTOR.as_mut_ptr(),
-            SECTOR_BYTES,
-        );
+        LIVE = Some(Live {
+            request,
+            desc,
+            avail,
+            used,
+            notify: notify + notify_off * u64::from(multiplier),
+            capacity,
+            avail_idx: 0,
+        });
     }
     true
 }
@@ -218,7 +308,7 @@ fn fill_queue(desc: u64, avail: u64, used: u64, request: u64) {
     write_desc(desc, 2, request + 0x210, 1, DESC_WRITE, 0);
     unsafe {
         (avail as *mut u16).write_volatile(0);
-        (avail as *mut u16).add(1).write_volatile(1);
+        (avail as *mut u16).add(1).write_volatile(0);
         (avail as *mut u16).add(2).write_volatile(0);
         (used as *mut u16).write_volatile(0);
         (used as *mut u16).add(1).write_volatile(0);

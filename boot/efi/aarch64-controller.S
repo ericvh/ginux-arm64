@@ -121,6 +121,77 @@ _start:
     mov x8, #64
     svc #0
 
+    mov x0, #-100
+    adr x1, disk_path
+    mov x2, #2
+    mov x3, #0
+    mov x8, #56
+    svc #0
+    cmp x0, #3
+    b.ne fail
+    mov x23, x0
+
+    mov x0, x23
+    mov x1, x19
+    mov x2, #17
+    mov x3, #512
+    mov x8, #67
+    svc #0
+    cmp x0, #17
+    b.ne fail
+    mov x0, #1
+    mov x1, x19
+    mov x2, #17
+    mov x8, #64
+    svc #0
+    cmp x0, #17
+    b.ne fail
+
+    mov x0, x23
+    mov x1, #1024
+    mov x2, #0
+    mov x8, #62
+    svc #0
+    cmp x0, #1024
+    b.ne fail
+    mov x0, x23
+    adr x1, sector_write_msg
+    adr x2, sector_write_msg_end
+    sub x2, x2, x1
+    mov x20, x2
+    mov x8, #64
+    svc #0
+    cmp x0, x20
+    b.ne fail
+
+    mov x0, x23
+    mov x1, #1024
+    mov x2, #0
+    mov x8, #62
+    svc #0
+    cmp x0, #1024
+    b.ne fail
+    mov x0, x23
+    mov x1, x19
+    mov x2, x20
+    mov x8, #63
+    svc #0
+    cmp x0, x20
+    b.ne fail
+    mov x0, #1
+    mov x1, x19
+    mov x2, x20
+    mov x8, #64
+    svc #0
+    cmp x0, x20
+    b.ne fail
+
+    mov x0, x23
+    mov x8, #57
+    svc #0
+    cmp x0, #0
+    b.ne fail
+
     mov x0, #0
     mov x8, #93
     svc #0
@@ -170,3 +241,8 @@ clone3_child_msg_end:
 clone3_parent_msg:
     .ascii "ginux-sbsa: clone3 parent ok\n"
 clone3_parent_msg_end:
+disk_path:
+    .asciz "/dev/vda"
+sector_write_msg:
+    .ascii "ginux-sector-write\n"
+sector_write_msg_end:

@@ -14,7 +14,8 @@
   an AArch64 controller ELF and starts that ELF instead of the generated
   probe. `write`, `brk`, and `mmap` use real user pages. The virtio-blk PCI
   device services `read`, and `clone` / `clone3` run a second EL0 context.
-  Gates 9.75, 10, 11,
+  `openat` of `/dev/vda` returns a block descriptor that can `pread64` a
+  later sector and write a sector back. Gates 9.75, 10, 11,
   and 13 remain the upstream product sequence and have not been started by
   this port.
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
@@ -94,14 +95,13 @@ scope, threat model, and invariants.
   stacked on gate 18. Gate 9.75 remains the next upstream product checkpoint
   and is not the active fork task.
 - Last evidence: `make uefi-aarch64-guest` passed under AAVMF on virt with
-  GICv3 and SMMUv3. The virtio-blk PCI device read `ginux-virtio-block` from
-  sector 0. The controller's `read` returned 19, `clone` returned 4243, and
-  `clone3` returned 4244. Each child printed its line and exited before the
-  parent resumed.
+  GICv3 and SMMUv3. `openat` of `/dev/vda` returned fd 3, `pread64` at sector
+  1 returned `ginux-sector-one`, and a block write of `ginux-sector-write`
+  read back the same bytes. `clone` returned 4243 and `clone3` returned 4244.
 - Open decision: Gate 9.75 must resolve the pre-boot hook execution context and
   authority model before implementing hooks.
-- Exact next action: wait for human review of the virtio-blk read and the
-  clone/clone3 context switch. Upstream gate 9.75 stays queued.
+- Exact next action: wait for human review of the virtio-blk file descriptor.
+  Upstream gate 9.75 stays queued.
 
 ## Evidence
 
@@ -398,8 +398,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Wait for human review of the virtio-blk read and the clone/clone3 context
-switch. Upstream gate 9.75 stays queued and is not this fork's next edit.
+Wait for human review of the virtio-blk file descriptor. Upstream gate 9.75
+stays queued and is not this fork's next edit.
 
 ## Context recovery
 
@@ -408,9 +408,10 @@ switch. Upstream gate 9.75 stays queued and is not this fork's next edit.
 - Reload after context shift: required
 - Active gate: 19, the AArch64 Linux svc table on the UEFI SBSA boot. Gate
   9.75 remains the next upstream product checkpoint and has not started.
-- Last evidence: `make uefi-aarch64-guest` passed under AAVMF. Virtio-blk
-  read `ginux-virtio-block`, `clone` returned 4243, and `clone3` returned
-  4244. Gates 9 and 9.5 were accepted by the human on 2026-11-06.
+- Last evidence: `make uefi-aarch64-guest` passed under AAVMF. `pread64`
+  returned `ginux-sector-one`, and the block write read back
+  `ginux-sector-write`. Gates 9 and 9.5 were accepted by the human on
+  2026-11-06.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive domain configuration,

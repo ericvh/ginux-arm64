@@ -128,17 +128,19 @@ fn behavior(entry: &LinuxCall, args: [u64; 6]) -> i64 {
             }
         }
         CLASS_SLEEP => EINVAL,
-        CLASS_IO | CLASS_FD => {
-            if entry.name == "write" {
-                super::user::write(a0, a1, a2)
-            } else if entry.name == "read" {
-                super::user::read(a0, a1, a2)
-            } else {
-                EBADF
-            }
-        }
+        CLASS_IO | CLASS_FD => match entry.name {
+            "write" => super::user::write(a0, a1, a2),
+            "read" => super::user::read(a0, a1, a2),
+            "pread64" => super::user::pread(a0, a1, a2, a3),
+            "pwrite64" => super::user::pwrite(a0, a1, a2, a3),
+            "lseek" => super::user::lseek(a0, a1, a2),
+            "close" => super::user::close(a0),
+            _ => EBADF,
+        },
         CLASS_PATH => {
-            if path_pointer(entry.name, a0, a1) == 0 {
+            if entry.name == "openat" {
+                super::user::openat(a0, a1)
+            } else if path_pointer(entry.name, a0, a1) == 0 {
                 EFAULT
             } else {
                 ENOENT

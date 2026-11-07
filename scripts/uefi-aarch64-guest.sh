@@ -21,6 +21,7 @@ cp "$vars_src" "$work/vars.fd"
 log="$work/boot.log"
 set +e
 printf 'ginux-virtio-block\n' >"$work/disk.img"
+printf 'ginux-sector-one\n' | dd of="$work/disk.img" bs=1 seek=512 conv=notrunc status=none
 dd if=/dev/zero of="$work/disk.img" bs=1 seek=1048575 count=1 conv=notrunc status=none
 timeout 90 qemu-system-aarch64 \
     -machine virt,gic-version=3,iommu=smmuv3,acpi=on \
@@ -67,6 +68,12 @@ for line in \
     "ginux: svc=dispatch nr=222 mmap result=" \
     "ginux-sbsa: controller memory ok" \
     "ginux-virtio-block" \
+    "ginux-sector-one" \
+    "ginux: svc=dispatch nr=56 openat result=" \
+    "ginux: svc=dispatch nr=67 pread64 result=" \
+    "ginux: svc=dispatch nr=62 lseek result=" \
+    "ginux-sector-write" \
+    "ginux: svc=dispatch nr=57 close result=" \
     "ginux: svc=dispatch nr=63 read result=" \
     "ginux-sbsa: clone child ok" \
     "ginux: svc=dispatch nr=220 clone result=" \
@@ -91,7 +98,7 @@ if grep -F -q "GINUX_KERNEL_PANIC" "$log"; then
     echo "uefi aarch64 kernel panicked" >&2
     fail=1
 fi
-for syscall in "nr=214 brk" "nr=222 mmap" "nr=64 write" "nr=63 read" "nr=220 clone" "nr=435 clone3"; do
+for syscall in "nr=214 brk" "nr=222 mmap" "nr=64 write" "nr=63 read" "nr=220 clone" "nr=435 clone3" "nr=56 openat" "nr=67 pread64" "nr=62 lseek" "nr=57 close"; do
     if grep -F "$syscall" "$log" | grep -F -q "result=-"; then
         echo "uefi aarch64 kernel returned an error for $syscall" >&2
         fail=1
