@@ -147,7 +147,13 @@ fn behavior(entry: &LinuxCall, args: [u64; 6]) -> i64 {
             }
         }
         CLASS_EAGAIN => EAGAIN,
-        CLASS_ECHILD => ECHILD,
+        CLASS_ECHILD => {
+            if entry.name == "waitid" {
+                super::syscall::waitid(a0, a1, a2, a3)
+            } else {
+                ECHILD
+            }
+        }
         CLASS_EXIT => 0,
         CLASS_SIGNAL => signal(entry.name, a0, a1, a2),
         CLASS_SIG => signal_mask(entry.name, a0, a1, a2, a3),

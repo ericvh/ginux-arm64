@@ -78,9 +78,14 @@ for line in \
     "ginux-sbsa: clone child ok" \
     "ginux: svc=dispatch nr=220 clone result=" \
     "ginux-sbsa: clone parent ok" \
+    "ginux: waitid pid 4243 status 42" \
+    "ginux-sbsa: waitid clone 42" \
     "ginux-sbsa: clone3 child ok" \
     "ginux: svc=dispatch nr=435 clone3 result=" \
     "ginux-sbsa: clone3 parent ok" \
+    "ginux: waitid pid 4244 status 7" \
+    "ginux-sbsa: waitid clone3 7" \
+    "ginux: svc=dispatch nr=95 waitid result=" \
     "ginux: svc=dispatch nr=93" \
     "ginux: process=exited" \
     "ginux: sbsa arm services ready"
@@ -98,7 +103,7 @@ if grep -F -q "GINUX_KERNEL_PANIC" "$log"; then
     echo "uefi aarch64 kernel panicked" >&2
     fail=1
 fi
-for syscall in "nr=214 brk" "nr=222 mmap" "nr=64 write" "nr=63 read" "nr=220 clone" "nr=435 clone3" "nr=56 openat" "nr=67 pread64" "nr=62 lseek" "nr=57 close"; do
+for syscall in "nr=214 brk" "nr=222 mmap" "nr=64 write" "nr=63 read" "nr=220 clone" "nr=435 clone3" "nr=56 openat" "nr=67 pread64" "nr=62 lseek" "nr=57 close" "nr=95 waitid"; do
     if grep -F "$syscall" "$log" | grep -F -q "result=-"; then
         echo "uefi aarch64 kernel returned an error for $syscall" >&2
         fail=1

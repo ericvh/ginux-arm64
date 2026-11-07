@@ -89,9 +89,38 @@ _start:
     cbz x0, clone_child
     cmp x0, #0
     b.le fail
+    mov x24, x0
     mov x0, #1
     adr x1, clone_parent_msg
     adr x2, clone_parent_msg_end
+    sub x2, x2, x1
+    mov x8, #64
+    svc #0
+
+    mov x0, #1
+    mov x1, x24
+    mov x2, x19
+    mov x3, #4
+    mov x4, #0
+    mov x8, #95
+    svc #0
+    cmp x0, #0
+    b.ne fail
+    ldr w1, [x19]
+    cmp w1, #17
+    b.ne fail
+    ldr w1, [x19, #8]
+    cmp w1, #1
+    b.ne fail
+    ldr w1, [x19, #16]
+    cmp w1, w24
+    b.ne fail
+    ldr w1, [x19, #24]
+    cmp w1, #42
+    b.ne fail
+    mov x0, #1
+    adr x1, wait_clone_msg
+    adr x2, wait_clone_msg_end
     sub x2, x2, x1
     mov x8, #64
     svc #0
@@ -114,9 +143,32 @@ _start:
     cbz x0, clone3_child
     cmp x0, #0
     b.le fail
+    mov x25, x0
     mov x0, #1
     adr x1, clone3_parent_msg
     adr x2, clone3_parent_msg_end
+    sub x2, x2, x1
+    mov x8, #64
+    svc #0
+
+    mov x0, #1
+    mov x1, x25
+    mov x2, x19
+    mov x3, #4
+    mov x4, #0
+    mov x8, #95
+    svc #0
+    cmp x0, #0
+    b.ne fail
+    ldr w1, [x19, #16]
+    cmp w1, w25
+    b.ne fail
+    ldr w1, [x19, #24]
+    cmp w1, #7
+    b.ne fail
+    mov x0, #1
+    adr x1, wait_clone3_msg
+    adr x2, wait_clone3_msg_end
     sub x2, x2, x1
     mov x8, #64
     svc #0
@@ -203,7 +255,7 @@ clone_child:
     sub x2, x2, x1
     mov x8, #64
     svc #0
-    mov x0, #0
+    mov x0, #42
     mov x8, #93
     svc #0
 
@@ -214,7 +266,7 @@ clone3_child:
     sub x2, x2, x1
     mov x8, #64
     svc #0
-    mov x0, #0
+    mov x0, #7
     mov x8, #93
     svc #0
 
@@ -235,12 +287,18 @@ clone_child_msg_end:
 clone_parent_msg:
     .ascii "ginux-sbsa: clone parent ok\n"
 clone_parent_msg_end:
+wait_clone_msg:
+    .ascii "ginux-sbsa: waitid clone 42\n"
+wait_clone_msg_end:
 clone3_child_msg:
     .ascii "ginux-sbsa: clone3 child ok\n"
 clone3_child_msg_end:
 clone3_parent_msg:
     .ascii "ginux-sbsa: clone3 parent ok\n"
 clone3_parent_msg_end:
+wait_clone3_msg:
+    .ascii "ginux-sbsa: waitid clone3 7\n"
+wait_clone3_msg_end:
 disk_path:
     .asciz "/dev/vda"
 sector_write_msg:

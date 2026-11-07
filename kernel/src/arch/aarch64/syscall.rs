@@ -177,9 +177,12 @@ extern "C" fn ginux_on_svc(frame: *mut u64) {
         }
     }
     if number == 93 {
+        let status = args[0];
+        let pid = current_pid();
         linux::note(93);
         uart::write(b"ginux: svc=dispatch nr=93\r\n");
         if resume_parent(frame) {
+            note_exit(pid, status);
             uart::write(b"ginux: clone child returned\r\n");
             return;
         }
@@ -312,6 +315,72 @@ fn resume_parent(frame: *mut u64) -> bool {
         );
     }
     true
+}
+
+#[derive(Clone, Copy)]
+struct Zombie {
+    pid: u64,
+    status: u32,
+}
+
+static mut ZOMBIES: [Option<Zombie>; 4] = [None; 4];
+
+#[allow(static_mut_refs)]
+fn note_exit(pid: u64, status: u64) {
+    let status = (status as u32) & 0xff;
+    let slots = unsafe { &mut ZOMBIES };
+    if let Some(slot) = slots.iter_mut().find(|slot| slot.is_none()) {
+        *slot = Some(Zombie { pid, status });
+    }
+}
+
+#[allow(static_mut_refs)]
+pub(crate) fn waitid(which: u64, pid: u64, info: u64, options: u64) -> i64 {
+    const P_ALL: u64 = 0;
+    const P_PID: u64 = 1;
+    const WNOHANG: u64 = 1;
+    const WEXITED: u64 = 4;
+    const WSTOPPED: u64 = 2;
+    const WCONTINUED: u64 = 8;
+    const WNOWAIT: u64 = 0x0100_0000;
+    const KNOWN: u64 = WNOHANG | WEXITED | WSTOPPED | WCONTINUED | WNOWAIT;
+    const ECHILD: i64 = -10;
+    if which > P_PID || (which == P_PID && pid == 0) {
+        return EINVAL;
+    }
+    if options & !KNOWN != 0 || options & (WEXITED | WSTOPPED | WCONTINUED) == 0 {
+        return EINVAL;
+    }
+    if options & WEXITED == 0 {
+        return if options & WNOHANG != 0 { 0 } else { ECHILD };
+    }
+    let slots = unsafe { &mut ZOMBIES };
+    let Some(index) = slots
+        .iter()
+        .position(|slot| slot.is_some_and(|zombie| which == P_ALL || zombie.pid == pid))
+    else {
+        return if options & WNOHANG != 0 { 0 } else { ECHILD };
+    };
+    let zombie = slots[index].unwrap();
+    if info != 0 {
+        let mut bytes = [0_u8; 48];
+        bytes[0..4].copy_from_slice(&17_u32.to_le_bytes());
+        bytes[8..12].copy_from_slice(&1_u32.to_le_bytes());
+        bytes[16..20].copy_from_slice(&(zombie.pid as u32).to_le_bytes());
+        bytes[24..28].copy_from_slice(&zombie.status.to_le_bytes());
+        if !super::user::write_bytes(info, &bytes) {
+            return EFAULT;
+        }
+    }
+    if options & WNOWAIT == 0 {
+        slots[index] = None;
+    }
+    uart::write(b"ginux: waitid pid ");
+    uart::write_u64(zombie.pid);
+    uart::write(b" status ");
+    uart::write_u64(u64::from(zombie.status));
+    uart::write(b"\r\n");
+    0
 }
 
 fn log_result(number: u64, name: &[u8], result: i64) {

@@ -383,6 +383,19 @@ pub(crate) fn read_bytes(pointer: u64, dest: &mut [u8]) -> bool {
     true
 }
 
+pub(crate) fn write_bytes(pointer: u64, source: &[u8]) -> bool {
+    let Some(state) = state() else {
+        return false;
+    };
+    if source.is_empty() || !covers(state, pointer, source.len() as u64) {
+        return false;
+    }
+    unsafe {
+        core::ptr::copy_nonoverlapping(source.as_ptr(), pointer as *mut u8, source.len());
+    }
+    true
+}
+
 pub(crate) fn stack_ok(top: u64) -> bool {
     let Some(state) = state() else {
         return false;
