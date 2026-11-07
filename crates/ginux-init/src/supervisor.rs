@@ -34,6 +34,7 @@ pub const PTRACE_GETREGS: usize = 12;
 #[allow(dead_code)]
 pub const PTRACE_SETREGS: usize = 13;
 pub const PTRACE_SYSCALL: usize = 24;
+#[cfg_attr(target_arch = "aarch64", allow(dead_code))]
 pub const PTRACE_SYSEMU: usize = 31;
 pub const PTRACE_SETOPTIONS: usize = 0x4200;
 pub const PTRACE_GETEVENTMSG: usize = 0x4201;
@@ -53,6 +54,7 @@ pub const EFAULT: i64 = 14;
 pub const EACCES: i64 = 13;
 pub const EINVAL: i64 = 22;
 pub const ENOSYS: i64 = 38;
+#[cfg_attr(target_arch = "aarch64", allow(dead_code))]
 pub const VIRTUAL_PID: u64 = 4242;
 pub const SIG_BLOCK: usize = 0;
 pub const SIGINT: usize = 2;
@@ -106,6 +108,7 @@ pub fn ptrace(request: usize, pid: usize, addr: usize, data: usize) -> isize {
     unsafe { syscall4(SYS_PTRACE, request, pid, addr, data) }
 }
 
+#[cfg_attr(target_arch = "aarch64", allow(dead_code))]
 pub fn read_tracee_word(pid: usize, address: usize) -> bool {
     let mut word = 0u64;
     ptrace(PTRACE_PEEKDATA, pid, address, &mut word as *mut _ as usize) >= 0

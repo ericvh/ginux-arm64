@@ -14,6 +14,8 @@ pub const MAX_OUTPUT: usize = 4096;
 
 const AT_NULL: u64 = 0;
 const AT_PAGESZ: u64 = 6;
+const EM_X86_64: u16 = 62;
+const EM_AARCH64: u16 = 183;
 const PERM_READ: u8 = 1;
 const PERM_WRITE: u8 = 2;
 const PERM_EXEC: u8 = 4;
@@ -68,6 +70,7 @@ pub enum RunError {
 pub struct LoadedElf {
     pub entry: u64,
     pub segments: u8,
+    pub machine: u16,
 }
 
 pub struct AddressSpace {
@@ -101,7 +104,8 @@ impl AddressSpace {
         if read_u16(elf, 16)? != 2 {
             return Err(LoadError::UnsupportedType);
         }
-        if read_u16(elf, 18)? != 62 {
+        let machine = read_u16(elf, 18)?;
+        if machine != EM_X86_64 && machine != EM_AARCH64 {
             return Err(LoadError::UnsupportedMachine);
         }
         let entry = read_u64(elf, 24)?;
@@ -190,10 +194,18 @@ impl AddressSpace {
                 .map_err(|_| LoadError::InvalidSegment)?;
             segments = segments.checked_add(1).ok_or(LoadError::InvalidSegment)?;
         }
-        if segments == 0 || !self.allowed(entry, 1, PERM_EXEC) {
+        if machine == EM_AARCH64 && entry & 3 != 0 {
             return Err(LoadError::InvalidEntry);
         }
-        Ok(LoadedElf { entry, segments })
+        let entry_bytes = if machine == EM_AARCH64 { 4 } else { 1 };
+        if segments == 0 || !self.allowed(entry, entry_bytes, PERM_EXEC) {
+            return Err(LoadError::InvalidEntry);
+        }
+        Ok(LoadedElf {
+            entry,
+            segments,
+            machine,
+        })
     }
 
     pub fn build_stack(&mut self, argv: &[&[u8]], env: &[&[u8]]) -> Result<u64, StackError> {
@@ -580,7 +592,14 @@ pub fn execute(
     entry: u64,
     stack: u64,
     step_limit: u64,
+    machine: u16,
 ) -> Result<ExecutionReport, RunError> {
+    if machine == EM_AARCH64 {
+        return execute_aarch64(memory, entry, stack, step_limit);
+    }
+    if machine != EM_X86_64 {
+        return Err(RunError::Cpu(CpuError::UnsupportedInstruction));
+    }
     let mut cpu = Cpu::new(entry, stack);
     let mut report = ExecutionReport {
         exit_code: -1,
@@ -652,6 +671,200 @@ fn push_audit(
     Ok(())
 }
 
+struct Aarch64Cpu {
+    x: [u64; 31],
+    pc: u64,
+    zero: bool,
+}
+
+impl Aarch64Cpu {
+    const fn new(entry: u64) -> Self {
+        Self {
+            x: [0; 31],
+            pc: entry,
+            zero: false,
+        }
+    }
+
+    fn reg(&self, index: u32) -> u64 {
+        if index == 31 {
+            0
+        } else {
+            self.x[index as usize]
+        }
+    }
+
+    fn set_reg(&mut self, index: u32, value: u64) {
+        if index != 31 {
+            self.x[index as usize] = value;
+        }
+    }
+
+    fn step(&mut self, memory: &AddressSpace) -> Result<Step, CpuError> {
+        if self.pc & 3 != 0 {
+            return Err(CpuError::UnsupportedInstruction);
+        }
+        let mut bytes = [0u8; 4];
+        memory
+            .fetch(self.pc, &mut bytes)
+            .map_err(CpuError::Memory)?;
+        let insn = u32::from_le_bytes(bytes);
+        let pc = self.pc;
+        self.pc = self.pc.wrapping_add(4);
+        // svc #0 is the Linux syscall. Catching it here is the bypass check:
+        // the instruction never runs on the host.
+        if insn & 0xffe0_001f == 0xd400_0001 {
+            if (insn >> 5) & 0xffff != 0 {
+                return Err(CpuError::UnsupportedInstruction);
+            }
+            return Ok(Step::Syscall(SyscallRequest {
+                number: self.reg(8),
+                args: [
+                    self.reg(0),
+                    self.reg(1),
+                    self.reg(2),
+                    self.reg(3),
+                    self.reg(4),
+                    self.reg(5),
+                ],
+            }));
+        }
+        if insn & 0xff80_0000 == 0xd280_0000 {
+            let hw = (insn >> 21) & 3;
+            let imm16 = (insn >> 5) & 0xffff;
+            self.set_reg(insn & 31, u64::from(imm16) << (hw * 16));
+            return Ok(Step::Continue);
+        }
+        if insn & 0xff00_0000 == 0xaa00_0000 && insn & 0x0020_0000 == 0 {
+            let shift = (insn >> 22) & 3;
+            let imm6 = (insn >> 10) & 0x3f;
+            if shift != 0 || imm6 != 0 {
+                return Err(CpuError::UnsupportedInstruction);
+            }
+            let rm = self.reg((insn >> 16) & 31);
+            let rn = self.reg((insn >> 5) & 31);
+            self.set_reg(insn & 31, rn | rm);
+            return Ok(Step::Continue);
+        }
+        if insn & 0xff00_0000 == 0xeb00_0000 && insn & 0x0020_0000 == 0 {
+            let shift = (insn >> 22) & 3;
+            let imm6 = (insn >> 10) & 0x3f;
+            if shift != 0 || imm6 != 0 {
+                return Err(CpuError::UnsupportedInstruction);
+            }
+            let left = self.reg((insn >> 5) & 31);
+            let right = self.reg((insn >> 16) & 31);
+            let result = left.wrapping_sub(right);
+            self.zero = result == 0;
+            self.set_reg(insn & 31, result);
+            return Ok(Step::Continue);
+        }
+        if insn & 0xff00_0000 == 0xf100_0000 || insn & 0xff00_0000 == 0xb100_0000 {
+            let shift = (insn >> 22) & 3;
+            if shift != 0 {
+                return Err(CpuError::UnsupportedInstruction);
+            }
+            let imm12 = u64::from((insn >> 10) & 0xfff);
+            let left = self.reg((insn >> 5) & 31);
+            let result = if insn & 0xff00_0000 == 0xf100_0000 {
+                left.wrapping_sub(imm12)
+            } else {
+                left.wrapping_add(imm12)
+            };
+            self.zero = result == 0;
+            self.set_reg(insn & 31, result);
+            return Ok(Step::Continue);
+        }
+        if insn & 0xff00_0000 == 0x5400_0000 {
+            let mut imm19 = ((insn >> 5) & 0x7ffff) as i32;
+            if imm19 & (1 << 18) != 0 {
+                imm19 |= !((1 << 19) - 1);
+            }
+            let take = match insn & 0xf {
+                0 => self.zero,
+                1 => !self.zero,
+                _ => return Err(CpuError::UnsupportedInstruction),
+            };
+            if take {
+                self.pc = pc.wrapping_add((i64::from(imm19) * 4) as u64);
+            }
+            return Ok(Step::Continue);
+        }
+        if insn & 0x9f00_0000 == 0x1000_0000 {
+            let immlo = (insn >> 29) & 0x3;
+            let immhi = (insn >> 5) & 0x7ffff;
+            let mut imm = ((immhi << 2) | immlo) as i32;
+            if imm & (1 << 20) != 0 {
+                imm |= !((1 << 21) - 1);
+            }
+            self.set_reg(insn & 31, pc.wrapping_add(imm as i64 as u64));
+            return Ok(Step::Continue);
+        }
+        Err(CpuError::UnsupportedInstruction)
+    }
+}
+
+fn execute_aarch64(
+    memory: &AddressSpace,
+    entry: u64,
+    _stack: u64,
+    step_limit: u64,
+) -> Result<ExecutionReport, RunError> {
+    let mut cpu = Aarch64Cpu::new(entry);
+    let mut report = ExecutionReport {
+        exit_code: -1,
+        output: [0; MAX_OUTPUT],
+        output_len: 0,
+        audit: [EMPTY_AUDIT; MAX_AUDIT],
+        audit_len: 0,
+        steps: 0,
+    };
+    while report.steps < step_limit {
+        report.steps += 1;
+        let request = match cpu.step(memory).map_err(RunError::Cpu)? {
+            Step::Continue => continue,
+            Step::Syscall(request) => request,
+        };
+        let number = ginux_core::to_x86(request.number).unwrap_or(u64::MAX);
+        let request = SyscallRequest {
+            number,
+            args: request.args,
+        };
+        let decision = decide(request.number);
+        let (action, result) = match decision.action {
+            Action::Emulate if request.number == SYS_GETPID => {
+                (AuditAction::Emulate, VIRTUAL_PID as i64)
+            }
+            Action::Emulate if request.number == SYS_EXIT => {
+                let result = request.args[0] as i32 as i64;
+                push_audit(&mut report, request.number, AuditAction::Emulate, result)?;
+                report.exit_code = (request.args[0] & 0xff) as i32;
+                return Ok(report);
+            }
+            Action::Mediate if request.number == SYS_WRITE => {
+                let length = usize::try_from(request.args[2]).unwrap_or(usize::MAX);
+                if request.args[0] != 1 || length > MAX_OUTPUT - report.output_len {
+                    (AuditAction::Deny, -22)
+                } else {
+                    let end = report.output_len + length;
+                    match memory.read(request.args[1], &mut report.output[report.output_len..end]) {
+                        Ok(()) => {
+                            report.output_len = end;
+                            (AuditAction::Mediate, length as i64)
+                        }
+                        Err(_) => (AuditAction::Deny, -14),
+                    }
+                }
+            }
+            Action::Deny(errno) => (AuditAction::Deny, -(errno as i64)),
+            _ => (AuditAction::Deny, -38),
+        };
+        push_audit(&mut report, request.number, action, result)?;
+        cpu.set_reg(0, result as u64);
+    }
+    Err(RunError::Cpu(CpuError::StepLimit))
+}
+
 fn read_u16(bytes: &[u8], offset: usize) -> Result<u16, LoadError> {
     let value = bytes.get(offset..offset + 2).ok_or(LoadError::Truncated)?;
     Ok(u16::from_le_bytes(value.try_into().unwrap()))
@@ -709,10 +922,37 @@ mod tests {
             .build_stack(&[b"fixture", b"arg"], &[b"KEY=value"])
             .unwrap();
         assert_eq!(memory.read_u64(stack).unwrap(), 2);
-        let report = execute(&memory, loaded.entry, stack, 100).unwrap();
+        let report = execute(&memory, loaded.entry, stack, 100, loaded.machine).unwrap();
         assert_eq!(report.exit_code, 0);
         assert_eq!(report.audit[0].syscall, SYS_GETPID);
         assert_eq!(report.audit[0].result, VIRTUAL_PID as i64);
+        assert_eq!(loaded.machine, EM_X86_64);
+    }
+
+    #[test]
+    fn loads_and_interprets_aligned_aarch64_elf() {
+        // movz x8, #172; svc #0; movz x9, #4242; cmp x0, x9; b.ne fail;
+        // movz x8, #93; orr x0, xzr, xzr; svc #0; fail: movz x8, #93; movz x0, #1; svc #0
+        let code: [u8; 44] = [
+            0x88, 0x15, 0x80, 0xd2, 0x01, 0x00, 0x00, 0xd4, 0x49, 0x12, 0x82, 0xd2, 0x1f, 0x00,
+            0x09, 0xeb, 0x81, 0x00, 0x00, 0x54, 0xa8, 0x0b, 0x80, 0xd2, 0xe0, 0x03, 0x1f, 0xaa,
+            0x01, 0x00, 0x00, 0xd4, 0xa8, 0x0b, 0x80, 0xd2, 0x20, 0x00, 0x80, 0xd2, 0x01, 0x00,
+            0x00, 0xd4,
+        ];
+        let mut elf = elf_with(&code, 5);
+        elf[18..20].copy_from_slice(&EM_AARCH64.to_le_bytes());
+        let mut memory = AddressSpace::new();
+        let loaded = memory.load_elf(&elf).unwrap();
+        assert_eq!(loaded.machine, EM_AARCH64);
+        assert_eq!(loaded.entry & 3, 0);
+        let stack = memory.build_stack(&[], &[]).unwrap();
+        let report = execute(&memory, loaded.entry, stack, 100, loaded.machine).unwrap();
+        assert_eq!(report.exit_code, 0);
+        assert_eq!(report.audit[0].syscall, SYS_GETPID);
+        assert_eq!(report.audit[0].result, VIRTUAL_PID as i64);
+        let mut unaligned = elf;
+        unaligned[24] = 1;
+        assert_eq!(memory.load_elf(&unaligned), Err(LoadError::InvalidEntry));
     }
 
     #[test]
@@ -816,7 +1056,7 @@ mod tests {
         let mut memory = AddressSpace::new();
         let loaded = memory.load_elf(&elf_with(&code, 5)).unwrap();
         let stack = memory.build_stack(&[b"fixture"], &[]).unwrap();
-        let report = execute(&memory, loaded.entry, stack, 100).unwrap();
+        let report = execute(&memory, loaded.entry, stack, 100, loaded.machine).unwrap();
         assert_eq!(report.audit[0].syscall, 999);
         assert_eq!(report.audit[0].action, AuditAction::Deny);
         assert_eq!(report.audit[0].result, -38);
@@ -849,7 +1089,7 @@ mod tests {
         let mut memory = AddressSpace::new();
         let loaded = memory.load_elf(&elf_with(&code[..code_len], 5)).unwrap();
         let stack = memory.build_stack(&[b"fixture"], &[]).unwrap();
-        let report = execute(&memory, loaded.entry, stack, 100).unwrap();
+        let report = execute(&memory, loaded.entry, stack, 100, loaded.machine).unwrap();
         assert_eq!(report.audit[0].result, -14);
         assert_eq!(report.audit[1].result, -22);
         assert_eq!(report.output_len, 0);
@@ -861,7 +1101,7 @@ mod tests {
         let loaded = memory.load_elf(&elf_with(&[0xcc], 5)).unwrap();
         let stack = memory.build_stack(&[b"fixture"], &[]).unwrap();
         assert!(matches!(
-            execute(&memory, loaded.entry, stack, 10),
+            execute(&memory, loaded.entry, stack, 10, loaded.machine),
             Err(RunError::Cpu(CpuError::UnsupportedInstruction))
         ));
     }
@@ -899,7 +1139,7 @@ mod tests {
             let mut memory = AddressSpace::new();
             let loaded = memory.load_elf(&elf_with(&code, 5)).unwrap();
             let stack = memory.build_stack(&[b"fixture"], &[]).unwrap();
-            let report = execute(&memory, loaded.entry, stack, 100).unwrap();
+            let report = execute(&memory, loaded.entry, stack, 100, loaded.machine).unwrap();
             assert_eq!(report.exit_code, expected);
         }
     }
