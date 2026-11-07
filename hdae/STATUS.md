@@ -9,8 +9,10 @@
   interrupt, starts one EL0 process, and dispatches `svc #0`. The historical
   UEFI kernel now also builds for aarch64 and boots under AAVMF with ACPI,
   AArch64 page tables, GICv3, the generic timer, PSCI, PCIe ECAM, SMMUv3, and
-  an EL0 `svc` path. That path now dispatches the 285 AArch64 numbers for
-  the Linux calls the x86_64 kernel implements. Gates 9.75, 10, 11,
+  an EL0 `svc` path. That path dispatches the 285 AArch64 numbers for the
+  Linux calls the x86_64 kernel implements. The aarch64 image now measures
+  an AArch64 controller ELF and starts that ELF instead of the generated
+  probe. `write`, `brk`, and `mmap` use real user pages. Gates 9.75, 10, 11,
   and 13 remain the upstream product sequence and have not been started by
   this port.
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
@@ -90,13 +92,14 @@ scope, threat model, and invariants.
   stacked on gate 18. Gate 9.75 remains the next upstream product checkpoint
   and is not the active fork task.
 - Last evidence: `make uefi-aarch64-guest` passed under AAVMF on virt with
-  GICv3 and SMMUv3. The log shows the SBSA services and
-  `ginux: aarch64 svc table unique=285`, including read, uname, brk, clone,
-  and mmap. The x86_64 `ginux-boot.efi` target is unchanged.
+  GICv3 and SMMUv3. The log shows the measured AArch64 controller, `brk`
+  results `0x20001000` and `0x20002000`, `mmap` result `0x20100000`, and
+  `ginux-sbsa: controller memory ok`. The x86_64 controller bytes in the
+  shared manifest are unchanged.
 - Open decision: Gate 9.75 must resolve the pre-boot hook execution context and
   authority model before implementing hooks.
-- Exact next action: wait for human review of the arm64 pull requests,
-  including the AArch64 svc table. Upstream gate 9.75 stays queued.
+- Exact next action: wait for human review of the bare-metal controller boot.
+  Upstream gate 9.75 stays queued.
 
 ## Evidence
 
@@ -393,8 +396,9 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Wait for human review of the arm64 pull requests, including the AArch64 svc
-table. Upstream gate 9.75 stays queued and is not this fork's next edit.
+Wait for human review of the bare-metal controller boot. The aarch64 UEFI
+image starts the measured AArch64 controller. Upstream gate 9.75 stays queued
+and is not this fork's next edit.
 
 ## Context recovery
 
@@ -403,9 +407,9 @@ table. Upstream gate 9.75 stays queued and is not this fork's next edit.
 - Reload after context shift: required
 - Active gate: 19, the AArch64 Linux svc table on the UEFI SBSA boot. Gate
   9.75 remains the next upstream product checkpoint and has not started.
-- Last evidence: `make uefi-aarch64-guest` passed under AAVMF and reported
-  `ginux: aarch64 svc table unique=285`. Gates 9 and 9.5 were accepted by
-  the human on 2026-11-06.
+- Last evidence: `make uefi-aarch64-guest` passed under AAVMF. The measured
+  controller wrote `ginux-sbsa: controller memory ok` after storing through
+  `brk` and `mmap`. Gates 9 and 9.5 were accepted by the human on 2026-11-06.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive domain configuration,

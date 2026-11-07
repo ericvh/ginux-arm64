@@ -1,6 +1,6 @@
 use super::acpi::Platform;
 use super::memory::MapRange;
-use super::{acpi, gic, memory, paging, pci, psci, smmu, syscall, timer, uart, Handoff};
+use super::{acpi, gic, memory, paging, pci, psci, smmu, syscall, timer, uart, user, Handoff};
 
 static mut RESET: Option<super::ResetSystem> = None;
 
@@ -65,11 +65,23 @@ pub(crate) fn bring_up(handoff: Handoff) -> ! {
         halt(b"ginux: firmware memory map is too fragmented\r\n");
     };
     push_device(&mut ranges, platform.gicd, 0x2_0000);
-    push_device(&mut ranges, platform.gicr, platform.gicr_length.max(0x2_0000));
+    push_device(
+        &mut ranges,
+        platform.gicr,
+        platform.gicr_length.max(0x2_0000),
+    );
     push_device(&mut ranges, platform.uart, 0x1000);
     if platform.ecam != 0 {
-        let buses = u64::from(platform.ecam_end_bus.saturating_sub(platform.ecam_start_bus)) + 1;
-        push_device(&mut ranges, platform.ecam, buses.saturating_mul(1024 * 1024));
+        let buses = u64::from(
+            platform
+                .ecam_end_bus
+                .saturating_sub(platform.ecam_start_bus),
+        ) + 1;
+        push_device(
+            &mut ranges,
+            platform.ecam,
+            buses.saturating_mul(1024 * 1024),
+        );
     }
     if platform.smmu != 0 {
         push_device(&mut ranges, platform.smmu, 0x2_0000);
@@ -86,7 +98,11 @@ pub(crate) fn bring_up(handoff: Handoff) -> ! {
             uart::write_u64(u64::from(version.major));
             uart::write(b".");
             uart::write_u64(u64::from(version.minor));
-            uart::write(if version.hvc { b" hvc\r\n" } else { b" smc\r\n" });
+            uart::write(if version.hvc {
+                b" hvc\r\n"
+            } else {
+                b" smc\r\n"
+            });
             start_secondary(&platform, version.hvc, &mut frames);
         }
         None => halt(b"ginux: psci unavailable\r\n"),
@@ -152,22 +168,12 @@ pub(crate) fn bring_up(handoff: Handoff) -> ! {
     uart::write_hex(u64::from(idr0));
     uart::write(b"\r\n");
 
-    let Some(code) = frames.alloc() else {
-        halt(b"ginux: user code frame unavailable\r\n");
+    let Some(loaded) = user::load(frames, &space, handoff.controller, handoff.controller_size)
+    else {
+        halt(b"ginux: controller elf invalid\r\n");
     };
-    let Some(stack) = frames.alloc() else {
-        halt(b"ginux: user stack frame unavailable\r\n");
-    };
-    if code & !0x1f_ffff != stack & !0x1f_ffff {
-        halt(b"ginux: user frames crossed a block boundary\r\n");
-    }
-    let entry = syscall::prepare_process(code);
-    unsafe { clean_executable(code, 0x120) };
-    if paging::map_user(&space, &mut frames, code, stack).is_none() {
-        halt(b"ginux: user mapping failed\r\n");
-    }
     uart::write(b"ginux: process=started\r\n");
-    unsafe { syscall::enter(entry, stack + 4096) }
+    unsafe { syscall::enter(loaded.entry, loaded.stack) }
 }
 
 fn start_secondary(platform: &Platform, hvc: bool, frames: &mut memory::Frames) {
@@ -249,7 +255,7 @@ fn affinity(mpidr: u64) -> u64 {
     mpidr & 0xff_00ff_ffff
 }
 
-unsafe fn clean_executable(page: u64, length: u64) {
+pub(crate) unsafe fn clean_executable(page: u64, length: u64) {
     let mut address = page & !63;
     let end = page + length;
     while address < end {

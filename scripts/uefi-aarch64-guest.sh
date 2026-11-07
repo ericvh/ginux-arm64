@@ -55,16 +55,17 @@ for line in \
     "ginux: timer-irq=" \
     "ginux: virtio pci device" \
     "ginux: smmuv3" \
-    "ginux: svc=dispatch nr=64" \
-    "ginux-sbsa: process-write ok" \
-    "ginux: svc=dispatch nr=172 result=4242" \
-    "ginux: svc=dispatch nr=63 read result=-9" \
-    "ginux: svc=dispatch nr=160 uname result=-14" \
+    "ginux: embedded controller runtime measurement accepted" \
+    "ginux: controller elf aarch64" \
+    "ginux: controller elf loaded" \
+    "ginux: process=started" \
+    "ginux-sbsa: controller write ok" \
+    "ginux: svc=dispatch nr=64 write result=" \
     "ginux: svc=dispatch nr=214 brk result=" \
-    "ginux: svc=dispatch nr=220 clone result=-11" \
-    "ginux: svc=dispatch nr=222 mmap result=-22" \
-    "ginux: aarch64 svc table unique=285" \
+    "ginux: svc=dispatch nr=222 mmap result=" \
+    "ginux-sbsa: controller memory ok" \
     "ginux: svc=dispatch nr=93" \
+    "ginux: process=exited" \
     "ginux: sbsa arm services ready"
 do
     if ! grep -F -q "$line" "$log"; then
@@ -80,6 +81,12 @@ if grep -F -q "GINUX_KERNEL_PANIC" "$log"; then
     echo "uefi aarch64 kernel panicked" >&2
     fail=1
 fi
+for syscall in "nr=214 brk" "nr=222 mmap" "nr=64 write"; do
+    if grep -F "$syscall" "$log" | grep -F -q "result=-"; then
+        echo "uefi aarch64 kernel returned an error for $syscall" >&2
+        fail=1
+    fi
+done
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi

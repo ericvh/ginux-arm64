@@ -55,12 +55,7 @@ const EAFNOSUPPORT: i64 = -97;
 
 const PID: i64 = 4242;
 static UMASK: AtomicU32 = AtomicU32::new(0o022);
-static BREAK: AtomicU64 = AtomicU64::new(0);
 static SEEN: [AtomicU64; 16] = [const { AtomicU64::new(0) }; 16];
-
-pub(crate) fn set_break(address: u64) {
-    BREAK.store(address, Ordering::Relaxed);
-}
 
 pub(crate) fn note(number: u64) {
     if number >= 1024 {
@@ -105,23 +100,8 @@ fn behavior(entry: &LinuxCall, args: [u64; 6]) -> i64 {
             let previous = UMASK.swap(a0 as u32 & 0o777, Ordering::Relaxed);
             i64::from(previous)
         }
-        CLASS_BRK => {
-            let current = BREAK.load(Ordering::Relaxed);
-            if a0 == 0 || a0 == current {
-                current as i64
-            } else {
-                ENOMEM
-            }
-        }
-        CLASS_MMAP => {
-            if a1 == 0 {
-                EINVAL
-            } else if a3 & 0x20 != 0 {
-                ENOMEM
-            } else {
-                EBADF
-            }
-        }
+        CLASS_BRK => super::user::brk(a0),
+        CLASS_MMAP => super::user::mmap(a0, a1, a2, a3),
         CLASS_MEM => {
             if entry.name == "mremap" || entry.name == "remap_file_pages" || entry.name == "mseal" {
                 EINVAL
@@ -148,7 +128,13 @@ fn behavior(entry: &LinuxCall, args: [u64; 6]) -> i64 {
             }
         }
         CLASS_SLEEP => EINVAL,
-        CLASS_IO | CLASS_FD => EBADF,
+        CLASS_IO | CLASS_FD => {
+            if entry.name == "write" {
+                super::user::write(a0, a1, a2)
+            } else {
+                EBADF
+            }
+        }
         CLASS_PATH => {
             if path_pointer(entry.name, a0, a1) == 0 {
                 EFAULT

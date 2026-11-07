@@ -3,10 +3,6 @@ use super::timer;
 use super::uart;
 use core::arch::global_asm;
 
-use core::sync::atomic::{AtomicU64, Ordering};
-
-static USER_BASE: AtomicU64 = AtomicU64::new(0);
-
 global_asm!(
     r#"
     .section .text.vectors, "ax"
@@ -105,17 +101,6 @@ pub(crate) fn wait_for_timer() {
     }
 }
 
-include!("user_program.inc.rs");
-
-pub(crate) fn prepare_process(code: u64) -> u64 {
-    USER_BASE.store(code, Ordering::Relaxed);
-    linux::set_break(code + 0x1000);
-    unsafe {
-        core::ptr::copy_nonoverlapping(USER_PROGRAM.as_ptr(), code as *mut u8, USER_PROGRAM.len());
-    }
-    code
-}
-
 pub(crate) unsafe fn enter(pc: u64, stack: u64) -> ! {
     core::arch::asm!(
         "msr sp_el0, {stack}",
@@ -159,21 +144,6 @@ extern "C" fn ginux_on_svc(frame: *mut u64) {
     }
     let number = unsafe { frame.add(8).read() };
     let args = [0, 1, 2, 3, 4, 5].map(|index| unsafe { frame.add(index).read() });
-    if number == 64 && demo_write(args[0], args[1]) {
-        linux::note(64);
-        uart::write(b"ginux: svc=dispatch nr=64\r\n");
-        let mut buffer = [0_u8; 128];
-        unsafe {
-            core::ptr::copy_nonoverlapping(
-                args[0] as *const u8,
-                buffer.as_mut_ptr(),
-                args[1] as usize,
-            );
-        }
-        uart::write(&buffer[..args[1] as usize]);
-        unsafe { frame.write(args[1]) };
-        return;
-    }
     if number == 172 {
         linux::note(172);
         uart::write(b"ginux: svc=dispatch nr=172 result=4242\r\n");
@@ -198,16 +168,6 @@ extern "C" fn ginux_on_svc(frame: *mut u64) {
             unsafe { frame.write((-38i64) as u64) };
         }
     }
-}
-
-fn demo_write(pointer: u64, length: u64) -> bool {
-    let base = USER_BASE.load(Ordering::Relaxed);
-    let message = b"ginux-sbsa: process-write ok\n";
-    if length != message.len() as u64 || pointer != base + MESSAGE_OFFSET as u64 {
-        return false;
-    }
-    let bytes = unsafe { core::slice::from_raw_parts(pointer as *const u8, message.len()) };
-    bytes == message
 }
 
 #[no_mangle]

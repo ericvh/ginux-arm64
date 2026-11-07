@@ -92,6 +92,7 @@ legacy-kernel-aarch64:
 	@./scripts/legacy-kernel-aarch64.sh
 
 uefi-aarch64-guest:
+	@./scripts/aarch64-controller.sh
 	@CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 cargo +1.99.0 build -p ginux-boot --target aarch64-unknown-uefi --release
 	@./scripts/uefi-aarch64-guest.sh
 

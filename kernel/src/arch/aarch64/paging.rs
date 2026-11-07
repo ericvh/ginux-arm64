@@ -2,10 +2,12 @@ use super::memory::{Frames, MapRange};
 
 const TWO_MEGABYTES: u64 = 2 * 1024 * 1024;
 
+#[derive(Clone, Copy)]
 struct Tables {
     l0: u64,
 }
 
+#[derive(Clone, Copy)]
 pub(crate) struct AddressSpace {
     tables: Tables,
 }
@@ -22,28 +24,49 @@ pub(crate) fn install(frames: &mut Frames, ranges: &[MapRange]) -> Option<Addres
     Some(space)
 }
 
-pub(crate) fn map_user(space: &AddressSpace, frames: &mut Frames, code: u64, stack: u64) -> Option<()> {
-    let block = code & !(TWO_MEGABYTES - 1);
-    if stack & !(TWO_MEGABYTES - 1) != block {
+#[derive(Clone, Copy)]
+pub(crate) enum UserPage {
+    Read,
+    Write,
+    Execute,
+}
+
+/// Maps one user page at `va` to an already-allocated physical frame.
+///
+/// A 2 MiB kernel block already covering `va` is left in place. The user
+/// window is outside the firmware map, so that entry starts empty.
+pub(crate) fn map_user_page(
+    space: &AddressSpace,
+    frames: &mut Frames,
+    va: u64,
+    pa: u64,
+    access: UserPage,
+) -> Option<()> {
+    if va & 4095 != 0 || pa & 4095 != 0 {
         return None;
     }
-    let l3 = frames.alloc()?;
-    let l3_ptr = l3 as *mut u64;
-    for page in 0..512 {
-        let pa = block + page * 4096;
-        let desc = if pa == code {
-            page_desc(pa, 0, 3, false, true)
-        } else if pa == stack {
-            page_desc(pa, 0, 1, true, true)
-        } else {
-            page_desc(pa, 0, 0, true, true)
-        };
-        unsafe { l3_ptr.add(page as usize).write_volatile(desc) };
-    }
-    let l2 = l2_table(frames, space.tables.l0, block)?;
-    let l2_index = ((block >> 21) & 511) as usize;
+    let l2 = l2_table(frames, space.tables.l0, va)?;
+    let l2_index = ((va >> 21) & 511) as usize;
+    let existing = unsafe { l2.add(l2_index).read_volatile() };
+    let l3 = if existing & 0x3 == 0x3 {
+        existing & 0x0000_ffff_ffff_f000
+    } else if existing & 1 == 0 {
+        let allocated = frames.alloc()?;
+        unsafe { l2.add(l2_index).write_volatile(table_desc(allocated)) };
+        allocated
+    } else {
+        return None;
+    };
+    let (ap, uxn) = match access {
+        UserPage::Read => (3, true),
+        UserPage::Write => (1, true),
+        UserPage::Execute => (3, false),
+    };
+    let page = ((va >> 12) & 511) as usize;
     unsafe {
-        l2.add(l2_index).write_volatile(table_desc(l3));
+        (l3 as *mut u64)
+            .add(page)
+            .write_volatile(page_desc(pa, 0, ap, uxn, true));
         asm_barrier();
     }
     Some(())
@@ -149,5 +172,11 @@ unsafe fn activate(l0: u64) {
 }
 
 unsafe fn asm_barrier() {
-    core::arch::asm!("dsb ish", "tlbi vmalle1", "dsb ish", "isb", options(nostack));
+    core::arch::asm!(
+        "dsb ish",
+        "tlbi vmalle1",
+        "dsb ish",
+        "isb",
+        options(nostack)
+    );
 }

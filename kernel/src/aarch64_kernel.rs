@@ -87,7 +87,9 @@ struct KernelStack([u8; 64 * 1024]);
 static mut KERNEL_STACK: KernelStack = KernelStack([0; 64 * 1024]);
 
 pub unsafe extern "C" fn kernel_entry(boot_info: *const BootInfo) -> ! {
-    let stack_top = core::ptr::addr_of_mut!(KERNEL_STACK).cast::<u8>().add(64 * 1024);
+    let stack_top = core::ptr::addr_of_mut!(KERNEL_STACK)
+        .cast::<u8>()
+        .add(64 * 1024);
     core::arch::asm!(
         "msr daifset, #0xf",
         "msr spsel, #1",
@@ -237,6 +239,8 @@ unsafe extern "C" fn kernel_main(boot_info: *const BootInfo) -> ! {
         image_base: boot_info.image_base as u64,
         image_size: boot_info.image_size as u64,
         reset: boot_info.reset_system,
+        controller: boot_info.controller_runtime,
+        controller_size: boot_info.controller_runtime_size,
     });
 }
 
