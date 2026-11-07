@@ -5,12 +5,9 @@ set -eu
 
 log=build/gate1-intercept.log
 ./scripts/check-rocky-host.sh
-rocky_scp \
-    target/x86_64-unknown-linux-gnu/release/ginux \
-    "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux"
-rocky_scp \
-    target/x86_64-unknown-linux-gnu/release/managed-payload \
-    "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux-managed-payload"
+release=$(ginux_release_dir)
+rocky_put "$release/ginux" /var/tmp/ginux
+rocky_put "$release/managed-payload" /var/tmp/ginux-managed-payload
 rocky_ssh 'chmod 0755 /var/tmp/ginux /var/tmp/ginux-managed-payload; /var/tmp/ginux' > "$log" 2>&1
 
 grep -Fq 'GINUX: syscall=getpid decision=emulate result=4242' "$log"

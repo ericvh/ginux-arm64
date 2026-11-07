@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-. ./config/rocky-host-image.env
+. ./scripts/rocky-image-env.sh
 . ./scripts/rocky-host-common.sh
 
 ./scripts/verify-rocky-host.sh
@@ -36,16 +36,22 @@ runcmd:
 EOF
 
 rm -f build/rocky-seed.iso build/rocky-seed.iso.cdr
-hdiutil makehybrid \
-    -quiet \
-    -iso \
-    -joliet \
-    -default-volume-name cidata \
-    -o build/rocky-seed.iso \
-    build/rocky-seed
-
-if [ -f build/rocky-seed.iso.cdr ] && [ ! -f build/rocky-seed.iso ]; then
-    mv build/rocky-seed.iso.cdr build/rocky-seed.iso
+if command -v hdiutil >/dev/null 2>&1; then
+    hdiutil makehybrid \
+        -quiet \
+        -iso \
+        -joliet \
+        -default-volume-name cidata \
+        -o build/rocky-seed.iso \
+        build/rocky-seed
+    if [ -f build/rocky-seed.iso.cdr ] && [ ! -f build/rocky-seed.iso ]; then
+        mv build/rocky-seed.iso.cdr build/rocky-seed.iso
+    fi
+elif command -v xorriso >/dev/null 2>&1; then
+    xorriso -as mkisofs -quiet -o build/rocky-seed.iso -V cidata -J -R build/rocky-seed
+else
+    printf '%s\n' 'cloud-init seed needs hdiutil or xorriso' >&2
+    exit 1
 fi
 test -f build/rocky-seed.iso
 printf '%s\n' 'Rocky host: cloud-init seed ready'

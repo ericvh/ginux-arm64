@@ -8,10 +8,8 @@ before=build/gate8-host-before.txt
 after=build/gate8-host-after.txt
 
 ./scripts/check-rocky-host.sh
-rocky_scp target/x86_64-unknown-linux-gnu/release/ginux \
-    "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux"
-rocky_scp config/domain-gate8.toml \
-    "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate8.toml"
+rocky_put "$(ginux_release_dir)/ginux" /var/tmp/ginux
+rocky_put config/domain-gate8.toml /var/tmp/gate8.toml
 
 rocky_ssh 'sha256sum /proc/1/cgroup /proc/1/mountinfo; find /sys/class/block -mindepth 1 -maxdepth 1 -printf "%f\n" | sort' > "$before"
 rocky_ssh 'chmod 0755 /var/tmp/ginux; /var/tmp/ginux kernel-views /var/tmp/gate8.toml' > "$log" 2>&1

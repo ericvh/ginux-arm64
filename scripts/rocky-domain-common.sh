@@ -1,7 +1,14 @@
 #!/bin/sh
 
-. ./config/rocky-host-image.env
+. ./scripts/rocky-image-env.sh
 . ./config/rocky-domain-image.env
+
+if [ "${ROCKY_ARCH:-x86_64}" = aarch64 ]; then
+    ROCKY_DOMAIN_CACHE_DIR=build/cache/domain/rocky-10.2-20260525.0-aarch64
+    ROCKY_DOMAIN_ROOTFS=rocky-10.2-aarch64-rootfs.tar
+    ROCKY_DOMAIN_MANIFEST=rocky-10.2-aarch64-rootfs.manifest
+    ROCKY_DOMAIN_METADATA=rocky-10.2-aarch64-rootfs.env
+fi
 
 ROCKY_SOURCE_IMAGE=${ROCKY_IMAGE_PATH:-build/cache/rocky/$ROCKY_IMAGE_NAME}
 ROCKY_DOMAIN_ROOTFS_PATH=$ROCKY_DOMAIN_CACHE_DIR/$ROCKY_DOMAIN_ROOTFS

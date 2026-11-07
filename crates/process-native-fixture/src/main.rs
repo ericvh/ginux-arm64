@@ -4,6 +4,7 @@
 use core::arch::{asm, global_asm};
 use core::panic::PanicInfo;
 
+#[cfg(target_arch = "x86_64")]
 global_asm!(
     ".global _start",
     ".type _start,@function",
@@ -15,12 +16,44 @@ global_asm!(
     options(att_syntax)
 );
 
+#[cfg(target_arch = "aarch64")]
+global_asm!(
+    ".global _start",
+    ".type _start, %function",
+    "_start:",
+    "mov x0, sp",
+    "bic sp, x0, #15",
+    "bl fixture_main",
+    "brk #1",
+);
+
+#[cfg(target_arch = "x86_64")]
 const SYS_WRITE: usize = 1;
+#[cfg(target_arch = "x86_64")]
 const SYS_GETPID: usize = 39;
+#[cfg(target_arch = "x86_64")]
 const SYS_FORK: usize = 57;
+#[cfg(target_arch = "x86_64")]
 const SYS_EXIT: usize = 60;
+#[cfg(target_arch = "x86_64")]
 const SYS_WAIT4: usize = 61;
+#[cfg(target_arch = "x86_64")]
 const SYS_GETPPID: usize = 110;
+
+#[cfg(target_arch = "aarch64")]
+const SYS_WRITE: usize = 64;
+#[cfg(target_arch = "aarch64")]
+const SYS_EXIT: usize = 93;
+#[cfg(target_arch = "aarch64")]
+const SYS_GETPID: usize = 172;
+#[cfg(target_arch = "aarch64")]
+const SYS_GETPPID: usize = 173;
+#[cfg(target_arch = "aarch64")]
+const SYS_CLONE: usize = 220;
+#[cfg(target_arch = "aarch64")]
+const SYS_WAIT4: usize = 260;
+#[cfg(target_arch = "aarch64")]
+const SIGCHLD: usize = 17;
 
 #[panic_handler]
 fn panic(_info: &PanicInfo<'_>) -> ! {
@@ -49,7 +82,7 @@ extern "C" fn fixture_main() -> ! {
 }
 
 fn fork_child(expected_pid: isize) -> isize {
-    let child = unsafe { syscall0(SYS_FORK) };
+    let child = host_fork();
     if child < 0 {
         exit(11);
     }
@@ -100,30 +133,100 @@ fn exit(code: usize) -> ! {
     }
 }
 
-#[inline(always)]
+#[cfg(target_arch = "x86_64")]
+fn host_fork() -> isize {
+    unsafe { syscall0(SYS_FORK) }
+}
+
+#[cfg(target_arch = "aarch64")]
+fn host_fork() -> isize {
+    // aarch64 has no fork entry. clone(SIGCHLD) is the fork shape.
+    unsafe { syscall5(SYS_CLONE, SIGCHLD, 0, 0, 0, 0) }
+}
+
+#[cfg(target_arch = "x86_64")]
 unsafe fn syscall0(number: usize) -> isize {
     let result: isize;
     asm!("syscall", inlateout("rax") number as isize => result, lateout("rcx") _, lateout("r11") _, options(nostack));
     result
 }
 
-#[inline(always)]
+#[cfg(target_arch = "aarch64")]
+unsafe fn syscall0(number: usize) -> isize {
+    let result: isize;
+    asm!("svc #0", in("x8") number, lateout("x0") result, options(nostack));
+    result
+}
+
+#[cfg(target_arch = "x86_64")]
 unsafe fn syscall1(number: usize, a1: usize) -> isize {
     let result: isize;
     asm!("syscall", inlateout("rax") number as isize => result, in("rdi") a1, lateout("rcx") _, lateout("r11") _, options(nostack));
     result
 }
 
-#[inline(always)]
+#[cfg(target_arch = "aarch64")]
+unsafe fn syscall1(number: usize, a1: usize) -> isize {
+    let result: isize;
+    asm!("svc #0", in("x8") number, inlateout("x0") a1 => result, options(nostack));
+    result
+}
+
+#[cfg(target_arch = "x86_64")]
 unsafe fn syscall3(number: usize, a1: usize, a2: usize, a3: usize) -> isize {
     let result: isize;
     asm!("syscall", inlateout("rax") number as isize => result, in("rdi") a1, in("rsi") a2, in("rdx") a3, lateout("rcx") _, lateout("r11") _, options(nostack));
     result
 }
 
-#[inline(always)]
+#[cfg(target_arch = "aarch64")]
+unsafe fn syscall3(number: usize, a1: usize, a2: usize, a3: usize) -> isize {
+    let result: isize;
+    asm!(
+        "svc #0",
+        in("x8") number,
+        inlateout("x0") a1 => result,
+        in("x1") a2,
+        in("x2") a3,
+        options(nostack)
+    );
+    result
+}
+
+#[cfg(target_arch = "x86_64")]
 unsafe fn syscall4(number: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> isize {
     let result: isize;
     asm!("syscall", inlateout("rax") number as isize => result, in("rdi") a1, in("rsi") a2, in("rdx") a3, in("r10") a4, lateout("rcx") _, lateout("r11") _, options(nostack));
+    result
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn syscall4(number: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> isize {
+    let result: isize;
+    asm!(
+        "svc #0",
+        in("x8") number,
+        inlateout("x0") a1 => result,
+        in("x1") a2,
+        in("x2") a3,
+        in("x3") a4,
+        options(nostack)
+    );
+    result
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn syscall5(number: usize, a1: usize, a2: usize, a3: usize, a4: usize, a5: usize) -> isize {
+    let result: isize;
+    asm!(
+        "svc #0",
+        in("x8") number,
+        inlateout("x0") a1 => result,
+        in("x1") a2,
+        in("x2") a3,
+        in("x3") a4,
+        in("x4") a5,
+        options(nostack)
+    );
     result
 }

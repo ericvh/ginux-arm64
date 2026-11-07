@@ -10,15 +10,10 @@ lifecycle_log=build/gate4-lifecycle.log
 rerun_log=build/gate4-domain-rerun.log
 
 ./scripts/check-rocky-host.sh
-rocky_scp \
-    target/x86_64-unknown-linux-gnu/release/ginux \
-    "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux"
-rocky_scp \
-    target/x86_64-unknown-linux-gnu/release/runtime-fixture \
-    "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux-runtime-fixture"
-rocky_scp \
-    config/domain-gate4.toml \
-    "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate4-valid.toml"
+rocky_put "$(ginux_release_dir)/ginux" /var/tmp/ginux
+rocky_put target/x86_64-unknown-linux-gnu/release/runtime-fixture \
+    /var/tmp/ginux-runtime-fixture
+rocky_put config/domain-gate4.toml /var/tmp/gate4-valid.toml
 
 rocky_ssh 'chmod 0755 /var/tmp/ginux /var/tmp/ginux-runtime-fixture; /var/tmp/ginux domain /var/tmp/gate4-valid.toml /var/tmp/ginux-runtime-fixture' > "$domain_log" 2>&1
 grep -Fqx 'GINUX_LIFECYCLE: state=created resources=false managed-task=false' "$domain_log"

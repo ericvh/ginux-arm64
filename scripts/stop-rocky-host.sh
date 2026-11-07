@@ -20,4 +20,8 @@ if kill -0 "$pid" 2>/dev/null; then
     kill "$pid"
 fi
 rm -f "$ROCKY_PID_FILE"
+if [ -n "${ROCKY_VIRTIOFSD_PID:-}" ] && [ -f "$ROCKY_VIRTIOFSD_PID" ]; then
+    kill "$(cat "$ROCKY_VIRTIOFSD_PID")" 2>/dev/null || true
+    rm -f "$ROCKY_VIRTIOFSD_PID" "${ROCKY_VIRTIOFS_SOCK:-}"
+fi
 printf '%s\n' 'Rocky host stopped'
