@@ -58,6 +58,12 @@ for line in \
     "ginux: svc=dispatch nr=64" \
     "ginux-sbsa: process-write ok" \
     "ginux: svc=dispatch nr=172 result=4242" \
+    "ginux: svc=dispatch nr=63 read result=-9" \
+    "ginux: svc=dispatch nr=160 uname result=-14" \
+    "ginux: svc=dispatch nr=214 brk result=" \
+    "ginux: svc=dispatch nr=220 clone result=-11" \
+    "ginux: svc=dispatch nr=222 mmap result=-22" \
+    "ginux: aarch64 svc table unique=285" \
     "ginux: svc=dispatch nr=93" \
     "ginux: sbsa arm services ready"
 do

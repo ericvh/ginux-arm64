@@ -208,9 +208,11 @@ The aarch64 image is the same bootloader and kernel crate. It shares the PE
 image check and the measured-boot manifest, then brings up Arm services from
 the UEFI handoff: ACPI (MADT, GTDT, MCFG, SPCR, IORT), AArch64 translation
 tables, a physical frame allocator, GICv3, the generic timer, PSCI, an SBSA or
-PL011 UART, PCIe ECAM, and SMMUv3. One EL0 process enters through `svc #0`
-(`64` writes its buffer, `172` returns `4242`, `93` exits). That image does
-not link the x86_64 APIC, paging, or Linux syscall path.
+PL011 UART, PCIe ECAM, and SMMUv3. One EL0 process enters through `svc #0`.
+It writes its buffer (`64`), returns `4242` from getpid (`172`), then issues
+the AArch64 numbers for the Linux calls the x86_64 kernel implements, and
+exits (`93`). That image does not link the x86_64 APIC, paging, or Linux
+syscall path.
 
 ```sh
 make uefi-aarch64-guest

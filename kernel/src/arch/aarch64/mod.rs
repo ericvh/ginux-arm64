@@ -1,5 +1,6 @@
 pub(crate) mod acpi;
 pub(crate) mod gic;
+pub(crate) mod linux;
 pub(crate) mod memory;
 pub(crate) mod paging;
 pub(crate) mod pci;

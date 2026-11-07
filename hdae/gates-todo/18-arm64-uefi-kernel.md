@@ -43,7 +43,7 @@ arch-specific files instead of a second kernel tree.
 ## Remaining work
 
 - [ ] Human review of the pull request.
-- [ ] The rest of the x86_64 Linux syscall surface.
+- [ ] The broader AArch64 syscall table continues in gate 19.
 
 ## Verification plan
 
