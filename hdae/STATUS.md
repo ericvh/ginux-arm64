@@ -9,8 +9,8 @@
   interrupt, starts one EL0 process, and dispatches `svc #0`. The historical
   UEFI kernel now also builds for aarch64 and boots under AAVMF with ACPI,
   AArch64 page tables, GICv3, the generic timer, PSCI, PCIe ECAM, SMMUv3, and
-  an EL0 `svc` path for write, getpid, and exit. The x86_64 Linux syscall
-  surface is not part of that image. Gates 9.75, 10, 11,
+  an EL0 `svc` path. That path now dispatches the 285 AArch64 numbers for
+  the Linux calls the x86_64 kernel implements. Gates 9.75, 10, 11,
   and 13 remain the upstream product sequence and have not been started by
   this port.
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
@@ -86,18 +86,17 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: 18, the aarch64 port of the historical UEFI kernel, stacked
-  on the virt process boot. Gate 17 remains technically passed and awaiting
-  human review. Gate 9.75 remains the next upstream product checkpoint and
-  is not the active fork task.
+- Active gate: 19, the AArch64 Linux svc table on the UEFI SBSA boot,
+  stacked on gate 18. Gate 9.75 remains the next upstream product checkpoint
+  and is not the active fork task.
 - Last evidence: `make uefi-aarch64-guest` passed under AAVMF on virt with
-  GICv3 and SMMUv3. The log shows EL1, ACPI, page tables, PSCI 1.1, timer
-  IRQ 30, virtio-blk `0x1001`, SMMUv3, and `svc` 64/172/93 with getpid
-  `4242`. The x86_64 `ginux-boot.efi` still links as PE32+ x86-64.
+  GICv3 and SMMUv3. The log shows the SBSA services and
+  `ginux: aarch64 svc table unique=285`, including read, uname, brk, clone,
+  and mmap. The x86_64 `ginux-boot.efi` target is unchanged.
 - Open decision: Gate 9.75 must resolve the pre-boot hook execution context and
   authority model before implementing hooks.
 - Exact next action: wait for human review of the arm64 pull requests,
-  including the UEFI SBSA boot. Upstream gate 9.75 stays queued.
+  including the AArch64 svc table. Upstream gate 9.75 stays queued.
 
 ## Evidence
 
@@ -394,22 +393,19 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Wait for human review of the arm64 pull requests, including the UEFI SBSA
-boot. Upstream gate 9.75 stays queued and is not this fork's next edit.
+Wait for human review of the arm64 pull requests, including the AArch64 svc
+table. Upstream gate 9.75 stays queued and is not this fork's next edit.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: 18, the aarch64 port of the historical UEFI kernel. Gate 17
-  remains technically passed and awaiting human review. Gate 9.75 remains
-  the next upstream product checkpoint and has not started.
-- Last evidence: `make uefi-aarch64-guest` passed under AAVMF on virt with
-  GICv3 and SMMUv3. The log shows EL1, ACPI, page tables, PSCI 1.1, timer
-  IRQ 30, virtio-blk `0x1001`, SMMUv3, and `svc` 64/172/93 with getpid
-  `4242`. The x86_64 `ginux-boot.efi` still links as PE32+ x86-64. Gates 9
-  and 9.5 were accepted by the human on 2026-11-06.
+- Active gate: 19, the AArch64 Linux svc table on the UEFI SBSA boot. Gate
+  9.75 remains the next upstream product checkpoint and has not started.
+- Last evidence: `make uefi-aarch64-guest` passed under AAVMF and reported
+  `ginux: aarch64 svc table unique=285`. Gates 9 and 9.5 were accepted by
+  the human on 2026-11-06.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive domain configuration,
