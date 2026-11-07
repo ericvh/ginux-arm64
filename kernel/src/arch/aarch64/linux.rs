@@ -113,7 +113,9 @@ fn behavior(entry: &LinuxCall, args: [u64; 6]) -> i64 {
         }
         CLASS_UNAME => super::user::uname(a0),
         CLASS_CLOCK => {
-            if a1 == 0 {
+            if entry.name == "clock_gettime" {
+                super::user::clock_gettime(a0, a1)
+            } else if a1 == 0 {
                 EFAULT
             } else if a0 > 1 {
                 EINVAL

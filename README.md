@@ -219,7 +219,8 @@ sector, and `lseek` (`62`) plus `write` (`64`) stores a sector that a
 following `read` returns. `brk`, `mmap`, and those block transfers use real
 memory, and each child runs until `exit` (`93`) before the parent resumes.
 `waitid` (`95`) returns that child's pid and exit status, then forgets the child.
-`uname` (`160`) reports `ginux` and `aarch64`. The AArch64 Linux syscall table remains available. That
+`uname` (`160`) reports `ginux` and `aarch64`. `clock_gettime` (`113`) returns
+the UEFI realtime clock and a monotonic time from the generic timer. The AArch64 Linux syscall table remains available. That
 image does not link the x86_64 APIC, paging, or Linux syscall path.
 
 ```sh

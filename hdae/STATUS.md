@@ -16,7 +16,9 @@
   device services `read`, and `clone` / `clone3` run a second EL0 context.
   `openat` of `/dev/vda` returns a block descriptor that can `pread64` a
   later sector and write a sector back. `waitid` returns a child exit status
-  and then forgets that child. Gates 9.75, 10, 11,
+  and then forgets that child. `fstat` reports `/dev/vda` as a block device,
+  `uname` reports `aarch64`, and `clock_gettime` returns the UEFI realtime
+  clock and the generic timer. Gates 9.75, 10, 11,
   and 13 remain the upstream product sequence and have not been started by
   this port.
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
@@ -96,12 +98,14 @@ scope, threat model, and invariants.
   stacked on gate 18. Gate 9.75 remains the next upstream product checkpoint
   and is not the active fork task.
 - Last evidence: `make uefi-aarch64-guest` passed under AAVMF on virt with
-  GICv3 and SMMUv3. `waitid` reaped pid 4243 with status 42 and pid 4244 with
-  status 7. The controller printed both statuses before the parent exited.
+  GICv3 and SMMUv3. `fstat` reported `/dev/vda` as a 1048576-byte block
+  device, `uname` reported `aarch64`, and `clock_gettime` returned both the
+  UEFI realtime clock and a monotonic generic-timer value.
 - Open decision: Gate 9.75 must resolve the pre-boot hook execution context and
-  authority model before implementing hooks.
-- Exact next action: wait for human review of `waitid`. Upstream gate 9.75
-  stays queued.
+  authority model before implementing hooks. The next bare-metal gap is a
+  filesystem on the virtio disk, which needs a format choice.
+- Exact next action: wait for a filesystem format choice before the next
+  bare-metal slice. Upstream gate 9.75 stays queued.
 
 ## Evidence
 
@@ -398,8 +402,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Wait for human review of `waitid`. Upstream gate 9.75 stays queued and is not
-this fork's next edit.
+Wait for a filesystem format choice before the next bare-metal slice.
+Upstream gate 9.75 stays queued and is not this fork's next edit.
 
 ## Context recovery
 
@@ -408,9 +412,10 @@ this fork's next edit.
 - Reload after context shift: required
 - Active gate: 19, the AArch64 Linux svc table on the UEFI SBSA boot. Gate
   9.75 remains the next upstream product checkpoint and has not started.
-- Last evidence: `make uefi-aarch64-guest` passed under AAVMF. `waitid`
-  reaped pid 4243 status 42 and pid 4244 status 7. Gates 9 and 9.5 were
-  accepted by the human on 2026-11-06.
+- Last evidence: `make uefi-aarch64-guest` passed under AAVMF. `fstat`
+  reported a 1048576-byte block device, `uname` reported `aarch64`, and
+  `clock_gettime` returned realtime and monotonic times. Gates 9 and 9.5
+  were accepted by the human on 2026-11-06.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive domain configuration,

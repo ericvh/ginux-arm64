@@ -132,6 +132,7 @@ unsafe extern "C" fn kernel_main(boot_info: *const BootInfo) -> ! {
         kernel_fail(b"ginux: invalid realtime clock handoff\r\n");
     }
     serial_write(b"ginux: realtime clock handoff accepted\r\n");
+    arch::aarch64::timer::capture_realtime(boot_info.unix_time);
 
     if validate_acpi_rsdp(boot_info.acpi_rsdp).is_none() {
         kernel_fail(b"ginux: invalid ACPI root pointer\r\n");

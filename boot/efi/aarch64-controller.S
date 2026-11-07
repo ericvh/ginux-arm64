@@ -293,6 +293,52 @@ _start:
     svc #0
 
     mov x0, #0
+    mov x1, x19
+    mov x8, #113
+    svc #0
+    cmp x0, #0
+    b.ne fail
+    ldr x1, [x19]
+    movz x2, #0xE100
+    movk x2, #0x5E0B, lsl #16
+    cmp x1, x2
+    b.lo fail
+    ldr x1, [x19, #8]
+    movz x2, #0xCA00
+    movk x2, #0x3B9A, lsl #16
+    cmp x1, x2
+    b.hs fail
+    mov x0, #1
+    adr x1, realtime_msg
+    adr x2, realtime_msg_end
+    sub x2, x2, x1
+    mov x8, #64
+    svc #0
+
+    mov x0, #1
+    mov x1, x19
+    mov x8, #113
+    svc #0
+    cmp x0, #0
+    b.ne fail
+    ldr x1, [x19]
+    ldr x3, [x19, #8]
+    orr x4, x1, x3
+    cbz x4, fail
+    cmp x1, #3600
+    b.hs fail
+    movz x2, #0xCA00
+    movk x2, #0x3B9A, lsl #16
+    cmp x3, x2
+    b.hs fail
+    mov x0, #1
+    adr x1, monotonic_msg
+    adr x2, monotonic_msg_end
+    sub x2, x2, x1
+    mov x8, #64
+    svc #0
+
+    mov x0, #0
     mov x8, #93
     svc #0
 
@@ -355,6 +401,12 @@ vda_msg_end:
 uname_msg:
     .ascii "ginux-sbsa: uname aarch64\n"
 uname_msg_end:
+realtime_msg:
+    .ascii "ginux-sbsa: clock realtime\n"
+realtime_msg_end:
+monotonic_msg:
+    .ascii "ginux-sbsa: clock monotonic\n"
+monotonic_msg_end:
 sector_write_msg:
     .ascii "ginux-sector-write\n"
 sector_write_msg_end:

@@ -1,6 +1,6 @@
 use super::memory::Frames;
 use super::paging::{self, AddressSpace, UserPage};
-use super::{platform, uart, virtio};
+use super::{platform, timer, uart, virtio};
 
 const PAGE: u64 = 4096;
 const USER_BASE: u64 = 0x2000_0000;
@@ -169,6 +169,22 @@ pub(crate) fn openat(dirfd: u64, path: u64) -> i64 {
             DISK_FD as i64
         }
     }
+}
+
+pub(crate) fn clock_gettime(clock: u64, pointer: u64) -> i64 {
+    if pointer == 0 {
+        return EFAULT;
+    }
+    let Some((seconds, nanos)) = timer::timespec(clock) else {
+        return EINVAL;
+    };
+    let mut bytes = [0_u8; 16];
+    bytes[0..8].copy_from_slice(&seconds.to_le_bytes());
+    bytes[8..16].copy_from_slice(&nanos.to_le_bytes());
+    if !write_bytes(pointer, &bytes) {
+        return EFAULT;
+    }
+    0
 }
 
 pub(crate) fn uname(pointer: u64) -> i64 {

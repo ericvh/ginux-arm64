@@ -1,7 +1,43 @@
-use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 static SEEN: AtomicBool = AtomicBool::new(false);
 static SEEN_INTID: AtomicU32 = AtomicU32::new(1023);
+static BOOT_UNIX: AtomicU64 = AtomicU64::new(0);
+static BOOT_TICKS: AtomicU64 = AtomicU64::new(0);
+
+pub(crate) fn capture_realtime(unix_time: u64) {
+    BOOT_TICKS.store(counter(), Ordering::Relaxed);
+    BOOT_UNIX.store(unix_time, Ordering::Relaxed);
+}
+
+pub(crate) fn counter() -> u64 {
+    let ticks: u64;
+    unsafe {
+        core::arch::asm!("mrs {v}, cntpct_el0", v = out(reg) ticks, options(nostack, nomem));
+    }
+    ticks
+}
+
+pub(crate) fn timespec(clock: u64) -> Option<(u64, u64)> {
+    let freq = frequency();
+    if freq == 0 {
+        return None;
+    }
+    let delta = counter().saturating_sub(BOOT_TICKS.load(Ordering::Relaxed));
+    let seconds = delta / freq;
+    let nanos = ((delta % freq) * 1_000_000_000) / freq;
+    match clock {
+        0 => {
+            let unix = BOOT_UNIX.load(Ordering::Relaxed);
+            if unix == 0 {
+                return None;
+            }
+            Some((unix.saturating_add(seconds), nanos))
+        }
+        1 => Some((seconds, nanos)),
+        _ => None,
+    }
+}
 
 pub(crate) fn frequency() -> u64 {
     let hz: u64;
@@ -37,5 +73,6 @@ pub(crate) fn note_interrupt(intid: u32) {
 }
 
 pub(crate) fn consumed() -> Option<u32> {
-    SEEN.load(Ordering::Acquire).then(|| SEEN_INTID.load(Ordering::Relaxed))
+    SEEN.load(Ordering::Acquire)
+        .then(|| SEEN_INTID.load(Ordering::Relaxed))
 }
