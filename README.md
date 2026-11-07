@@ -213,7 +213,8 @@ The kernel loads that ELF into user memory, then the controller writes to the
 UART (`64`), grows `brk` (`214`), and maps an anonymous page with `mmap`
 (`222`). It reads the virtio-blk PCI disk (`63`) and starts two more EL0
 contexts with `clone` (`220`) and `clone3` (`435`). `openat` (`56`) of
-`/dev/vda` returns a block descriptor. `pread64` (`67`) reads a later
+`/dev/vda` returns a block descriptor. `fstat` (`80`) reports that descriptor
+as a block device of 1048576 bytes. `pread64` (`67`) reads a later
 sector, and `lseek` (`62`) plus `write` (`64`) stores a sector that a
 following `read` returns. `brk`, `mmap`, and those block transfers use real
 memory, and each child runs until `exit` (`93`) before the parent resumes.

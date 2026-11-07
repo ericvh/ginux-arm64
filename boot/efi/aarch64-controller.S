@@ -185,6 +185,28 @@ _start:
 
     mov x0, x23
     mov x1, x19
+    mov x8, #80
+    svc #0
+    cmp x0, #0
+    b.ne fail
+    ldr w1, [x19, #16]
+    and w1, w1, #0xf000
+    cmp w1, #0x6000
+    b.ne fail
+    ldr x1, [x19, #48]
+    mov x2, #1
+    lsl x2, x2, #20
+    cmp x1, x2
+    b.ne fail
+    mov x0, #1
+    adr x1, vda_msg
+    adr x2, vda_msg_end
+    sub x2, x2, x1
+    mov x8, #64
+    svc #0
+
+    mov x0, x23
+    mov x1, x19
     mov x2, #17
     mov x3, #512
     mov x8, #67
@@ -301,6 +323,9 @@ wait_clone3_msg:
 wait_clone3_msg_end:
 disk_path:
     .asciz "/dev/vda"
+vda_msg:
+    .ascii "ginux-sbsa: vda block 1048576\n"
+vda_msg_end:
 sector_write_msg:
     .ascii "ginux-sector-write\n"
 sector_write_msg_end:

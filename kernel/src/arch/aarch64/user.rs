@@ -171,6 +171,25 @@ pub(crate) fn openat(dirfd: u64, path: u64) -> i64 {
     }
 }
 
+pub(crate) fn fstat(fd: u64, pointer: u64) -> i64 {
+    if fd != DISK_FD || !disk_open() {
+        return EBADF;
+    }
+    let sectors = virtio::capacity_sectors();
+    let bytes = sectors.saturating_mul(512);
+    let mut stat = [0_u8; 128];
+    stat[16..20].copy_from_slice(&0x6180_u32.to_le_bytes());
+    stat[20..24].copy_from_slice(&1_u32.to_le_bytes());
+    stat[32..40].copy_from_slice(&0xfe00_u64.to_le_bytes());
+    stat[48..56].copy_from_slice(&bytes.to_le_bytes());
+    stat[56..60].copy_from_slice(&512_u32.to_le_bytes());
+    stat[64..72].copy_from_slice(&sectors.to_le_bytes());
+    if !write_bytes(pointer, &stat) {
+        return EFAULT;
+    }
+    0
+}
+
 pub(crate) fn close(fd: u64) -> i64 {
     if fd == DISK_FD && disk_open() {
         if let Some(state) = state() {

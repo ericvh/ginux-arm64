@@ -135,6 +135,7 @@ fn behavior(entry: &LinuxCall, args: [u64; 6]) -> i64 {
             "pwrite64" => super::user::pwrite(a0, a1, a2, a3),
             "lseek" => super::user::lseek(a0, a1, a2),
             "close" => super::user::close(a0),
+            "fstat" => super::user::fstat(a0, a1),
             _ => EBADF,
         },
         CLASS_PATH => {
