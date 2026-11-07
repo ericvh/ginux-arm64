@@ -1,9 +1,11 @@
-// Early aarch64 entry for the historical UEFI kernel.
+// aarch64 entry for the historical UEFI kernel.
 //
 // The x86_64 implementation stays in `x86_64_kernel.rs`. This file shares the
 // PE loader, the measured-boot manifest, and the boot-information contract.
-// It stops where that kernel depends on x86_64 page tables, PCI, the local
-// APIC, or the Linux syscall ABI.
+// After that handoff it brings up ACPI, AArch64 translation tables, a physical
+// frame allocator, GICv3, the generic timer, PSCI, PCIe ECAM, and SMMUv3, then
+// dispatches Linux svc numbers. The measured-boot bundle remains signed data
+// and is not executed.
 
 mod arch;
 mod crypto;
