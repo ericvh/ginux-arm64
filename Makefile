@@ -9,6 +9,15 @@ RUNTIME_FIXTURE := target/$(X86_TARGET)/release/runtime-fixture
 PROCESS_NATIVE_FIXTURE := target/$(X86_TARGET)/release/process-native-fixture
 
 ARM64_TARGET := aarch64-unknown-linux-gnu
+
+# `make test` boots the aarch64 Rocky guest. Other targets stay on the
+# x86_64 Rocky host unless ROCKY_ARCH=aarch64 is passed on the command line.
+ROCKY_ARCH ?= x86_64
+ifeq ($(ROCKY_ARCH),aarch64)
+ROCKY_GUEST_BUILD := build build-arm64
+else
+ROCKY_GUEST_BUILD := build
+endif
 GINUX_ARM64 := target/$(ARM64_TARGET)/release/ginux
 PAYLOAD_ARM64 := target/$(ARM64_TARGET)/release/managed-payload
 
@@ -51,7 +60,7 @@ systemd-image-prepare:
 	@GINUX_OCI_CONFIG_FILE=./config/rocky-systemd-oci.env ./scripts/prepare-rocky-oci.sh
 
 test-image:
-	@./scripts/test-rocky-domain.sh
+	@ROCKY_ARCH='$(ROCKY_ARCH)' ./scripts/test-rocky-domain.sh
 
 test-oci-image:
 	@./scripts/test-rocky-oci.sh
@@ -72,6 +81,7 @@ build:
 build-arm64:
 	cargo build -p ginux-init --target $(ARM64_TARGET) --release
 	cargo build -p managed-payload --target $(ARM64_TARGET) --release
+	cargo build -p process-native-fixture --target $(ARM64_TARGET) --release
 
 gate1-aarch64-guest: build-arm64
 	@./scripts/gate1-aarch64-guest.sh
@@ -129,8 +139,8 @@ test-unit:
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-vfs
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-kernel-views
 
-test-intercept: build
-	@./scripts/with-rocky-host.sh ./scripts/test-intercept.sh
+test-intercept: $(ROCKY_GUEST_BUILD)
+	@ROCKY_ARCH='$(ROCKY_ARCH)' ./scripts/with-rocky-host.sh ./scripts/test-intercept.sh
 
 .PHONY: build-gate1-fixture test-gate1-setup
 build-gate1-fixture:
@@ -141,28 +151,28 @@ build-gate1-fixture:
 test-gate1-setup:
 	python3 scripts/test-gate1-setup.py $(GINUX) .artifacts/gate1/deny-ptrace .artifacts/gate1/payload
 
-test-runtime: build
-	@./scripts/with-rocky-host.sh ./scripts/test-runtime.sh
+test-runtime: $(ROCKY_GUEST_BUILD)
+	@ROCKY_ARCH='$(ROCKY_ARCH)' ./scripts/with-rocky-host.sh ./scripts/test-runtime.sh
 
-test-config: build
-	@./scripts/with-rocky-host.sh ./scripts/test-config.sh
+test-config: $(ROCKY_GUEST_BUILD)
+	@ROCKY_ARCH='$(ROCKY_ARCH)' ./scripts/with-rocky-host.sh ./scripts/test-config.sh
 
-test-domain: build
-	@./scripts/with-rocky-host.sh ./scripts/test-domain.sh
+test-domain: $(ROCKY_GUEST_BUILD)
+	@ROCKY_ARCH='$(ROCKY_ARCH)' ./scripts/with-rocky-host.sh ./scripts/test-domain.sh
 
-test-process: build
+test-process: $(ROCKY_GUEST_BUILD)
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-process
-	@./scripts/with-rocky-host.sh ./scripts/test-process.sh
+	@ROCKY_ARCH='$(ROCKY_ARCH)' ./scripts/with-rocky-host.sh ./scripts/test-process.sh
 
-test-devices: build
+test-devices: $(ROCKY_GUEST_BUILD)
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-devices registry
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-devices pseudo_devices
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-devices conflicts_ioctls
-	@./scripts/with-rocky-host.sh ./scripts/test-devices.sh
+	@ROCKY_ARCH='$(ROCKY_ARCH)' ./scripts/with-rocky-host.sh ./scripts/test-devices.sh
 
-test-kernel-views: build
+test-kernel-views: $(ROCKY_GUEST_BUILD)
 	RUSTFLAGS='' CARGO_TARGET_DIR=.artifacts/unit cargo test -p ginux-kernel-views
-	@./scripts/with-rocky-host.sh ./scripts/test-kernel-views.sh
+	@ROCKY_ARCH='$(ROCKY_ARCH)' ./scripts/with-rocky-host.sh ./scripts/test-kernel-views.sh
 
 test-systemd: build systemd-image-prepare
 	@ROCKY_NETWORK_RESTRICT=on ./scripts/with-rocky-host.sh ./scripts/test-systemd.sh
@@ -193,7 +203,8 @@ test-vfs: build domain-image-prepare
 test-native-vfs: build domain-image-prepare
 	@./scripts/with-rocky-host.sh ./scripts/test-native-vfs.sh
 
-test: check test-unit test-intercept test-runtime test-config test-domain test-image test-devices test-process test-kernel-views
+test:
+	$(MAKE) ROCKY_ARCH=aarch64 check test-unit test-intercept test-runtime test-config test-domain test-image test-devices test-process test-kernel-views
 
 bench-baseline: build
 	@./scripts/with-rocky-host.sh ./scripts/bench-baseline.sh

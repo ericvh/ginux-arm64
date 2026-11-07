@@ -15,10 +15,11 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 mkdir -p "$mountpoint"
+part=${ROCKY_ROOT_PART:-4}
 partition=$(sfdisk -d "$raw_image" |
-    sed -n 's/.*4 : start= *\([0-9][0-9]*\), size= *\([0-9][0-9]*\),.*/\1 \2/p')
+    sed -n "s/.*${part} : start= *\\([0-9][0-9]*\\), size= *\\([0-9][0-9]*\\),.*/\\1 \\2/p")
 if [ -z "$partition" ]; then
-    printf '%s\n' 'Rocky root partition 4 was not found' >&2
+    printf 'Rocky root partition %s was not found\n' "$part" >&2
     exit 1
 fi
 set -- $partition

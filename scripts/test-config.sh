@@ -14,24 +14,12 @@ valid_effective=build/gate4-config-valid.effective
 equivalent_effective=build/gate4-config-equivalent.effective
 
 ./scripts/check-rocky-host.sh
-rocky_scp \
-    target/x86_64-unknown-linux-gnu/release/ginux \
-    "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux"
-rocky_scp \
-    config/domain-gate4.toml \
-    "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate4-valid.toml"
-rocky_scp \
-    tests/fixtures/domain-gate4-equivalent.toml \
-    "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate4-equivalent.toml"
-rocky_scp \
-    tests/fixtures/domain-gate4-unknown.toml \
-    "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate4-unknown.toml"
-rocky_scp \
-    tests/fixtures/domain-gate4-performance.toml \
-    "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate4-performance.toml"
-rocky_scp \
-    tests/fixtures/domain-gate4-host-path.toml \
-    "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate4-host-path.toml"
+rocky_put "$(ginux_release_dir)/ginux" /var/tmp/ginux
+rocky_put config/domain-gate4.toml /var/tmp/gate4-valid.toml
+rocky_put tests/fixtures/domain-gate4-equivalent.toml /var/tmp/gate4-equivalent.toml
+rocky_put tests/fixtures/domain-gate4-unknown.toml /var/tmp/gate4-unknown.toml
+rocky_put tests/fixtures/domain-gate4-performance.toml /var/tmp/gate4-performance.toml
+rocky_put tests/fixtures/domain-gate4-host-path.toml /var/tmp/gate4-host-path.toml
 
 rocky_ssh 'chmod 0755 /var/tmp/ginux; /var/tmp/ginux config /var/tmp/gate4-valid.toml' > "$valid_log" 2>&1
 rocky_ssh '/var/tmp/ginux config /var/tmp/gate4-equivalent.toml' > "$equivalent_log" 2>&1

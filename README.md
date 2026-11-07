@@ -159,6 +159,14 @@ make check
 make test
 ```
 
+`make test` runs the host checks, then boots the pinned Rocky Linux 10
+aarch64 GenericCloud image under `qemu-system-aarch64`. The guest mounts
+this tree at `/mnt/host` (tag `hostshare`) and the suite copies the aarch64
+Ginux binaries from that share. The Rocky 10 aarch64 kernel is built with
+`CONFIG_NET_9P` disabled, so the share is virtiofs. Leave `ROCKY_ARCH`
+unset to keep the x86_64 Rocky host for an individual target such as
+`make test-intercept`.
+
 Each userspace binary targets one architecture. `make build` is the x86_64
 daemon and its x86_64 fixtures. The aarch64 daemon is a separate build:
 
