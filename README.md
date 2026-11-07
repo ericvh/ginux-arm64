@@ -206,8 +206,10 @@ tree with its own `make build` and `make run` (`qemu-system-x86_64`).
 
 The aarch64 virt kernel in this tree is `legacy-kernel/`. It drops to EL1,
 installs exception vectors, identity-maps RAM and the virt MMIO frame,
-enables the MMU, takes one ARM generic-timer interrupt through the GICv2,
-prints on the virt PL011, and exits through semihosting:
+enables the MMU, and takes one ARM generic-timer interrupt through the GICv2.
+It then starts one EL0 process. That process enters the kernel with `svc #0`;
+the kernel dispatches the number in `x8` (`64` writes the process buffer,
+`93` exits the process). The x86_64 UEFI kernel is unchanged:
 
 ```sh
 rustup target add aarch64-unknown-none

@@ -38,6 +38,26 @@ if ! grep -q "ginux-legacy: timer-irq=1" "$log"; then
     echo "legacy aarch64 kernel did not take a timer interrupt" >&2
     exit 1
 fi
+if ! grep -q "ginux-legacy: process=started" "$log"; then
+    echo "legacy aarch64 kernel did not start a process" >&2
+    exit 1
+fi
+if ! grep -q "ginux-legacy: svc=dispatch nr=64" "$log"; then
+    echo "legacy aarch64 kernel did not dispatch svc write" >&2
+    exit 1
+fi
+if ! grep -q "ginux-legacy: process-write ok" "$log"; then
+    echo "legacy aarch64 kernel did not copy the process write" >&2
+    exit 1
+fi
+if ! grep -q "ginux-legacy: svc=dispatch nr=93" "$log"; then
+    echo "legacy aarch64 kernel did not dispatch svc exit" >&2
+    exit 1
+fi
+if ! grep -q "ginux-legacy: process=exited" "$log"; then
+    echo "legacy aarch64 kernel did not exit the process" >&2
+    exit 1
+fi
 if [ "$status" -ne 0 ] && [ "$status" -ne 124 ]; then
     echo "qemu-system-aarch64 exited $status" >&2
     exit "$status"
