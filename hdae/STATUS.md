@@ -7,8 +7,10 @@
   requests. The x86_64 gate 1 guest and the aarch64 native `brk #0` fix are
   stacked above that port. The virt kernel enables the MMU, takes a timer
   interrupt, starts one EL0 process, and dispatches `svc #0`. The historical
-  UEFI kernel now also builds for aarch64 and stops after the measured-boot
-  handoff, before paging, virtio PCI, and the Linux ABI. Gates 9.75, 10, 11,
+  UEFI kernel now also builds for aarch64 and boots under AAVMF with ACPI,
+  AArch64 page tables, GICv3, the generic timer, PSCI, PCIe ECAM, SMMUv3, and
+  an EL0 `svc` path for write, getpid, and exit. The x86_64 Linux syscall
+  surface is not part of that image. Gates 9.75, 10, 11,
   and 13 remain the upstream product sequence and have not been started by
   this port.
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
@@ -88,16 +90,14 @@ scope, threat model, and invariants.
   on the virt process boot. Gate 17 remains technically passed and awaiting
   human review. Gate 9.75 remains the next upstream product checkpoint and
   is not the active fork task.
-- Last evidence: `make test-systemd-interactive` passed from a clean isolated
-  overlay with `ps -ef` at 309 ms, `top -b -n 1` at 913 ms, and valid Bash
-  timing fields, plus cold acquisition, offline cache reuse, retained domain
-  state, and restart reuse. `make test-systemd` and aggregate `make test` also
-  passed.
+- Last evidence: `make uefi-aarch64-guest` passed under AAVMF on virt with
+  GICv3 and SMMUv3. The log shows EL1, ACPI, page tables, PSCI 1.1, timer
+  IRQ 30, virtio-blk `0x1001`, SMMUv3, and `svc` 64/172/93 with getpid
+  `4242`. The x86_64 `ginux-boot.efi` still links as PE32+ x86-64.
 - Open decision: Gate 9.75 must resolve the pre-boot hook execution context and
   authority model before implementing hooks.
-- Exact next action: merge the Gate 9/9.5 closure pull request, then create
-  `hdae/domain-specification-network-controls` from updated `main` and begin
-  Gate 9.75 alignment with the pre-boot hook decision.
+- Exact next action: wait for human review of the arm64 pull requests,
+  including the UEFI SBSA boot. Upstream gate 9.75 stays queued.
 
 ## Evidence
 
@@ -394,8 +394,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Wait for human review of the arm64 pull requests, including the UEFI kernel
-port. Upstream gate 9.75 stays queued and is not this fork's next edit.
+Wait for human review of the arm64 pull requests, including the UEFI SBSA
+boot. Upstream gate 9.75 stays queued and is not this fork's next edit.
 
 ## Context recovery
 
@@ -405,11 +405,11 @@ port. Upstream gate 9.75 stays queued and is not this fork's next edit.
 - Active gate: 18, the aarch64 port of the historical UEFI kernel. Gate 17
   remains technically passed and awaiting human review. Gate 9.75 remains
   the next upstream product checkpoint and has not started.
-- Last evidence: `make demo-gate-9.5`, `make test-systemd-interactive`,
-  `make test-systemd`, `make test`, and `make check` passed. The isolated
-  interactive run measured `ps -ef` at 309 ms and `top -b -n 1` at 913 ms,
-  retained domains and OCI content across host restart, and reused the OCI
-  cache offline. The human accepted Gates 9 and 9.5 on 2026-11-06.
+- Last evidence: `make uefi-aarch64-guest` passed under AAVMF on virt with
+  GICv3 and SMMUv3. The log shows EL1, ACPI, page tables, PSCI 1.1, timer
+  IRQ 30, virtio-blk `0x1001`, SMMUv3, and `svc` 64/172/93 with getpid
+  `4242`. The x86_64 `ginux-boot.efi` still links as PE32+ x86-64. Gates 9
+  and 9.5 were accepted by the human on 2026-11-06.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive domain configuration,

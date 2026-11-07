@@ -5,6 +5,7 @@
 // It stops where that kernel depends on x86_64 page tables, PCI, the local
 // APIC, or the Linux syscall ABI.
 
+mod arch;
 mod crypto;
 mod manifest;
 mod pe;
@@ -16,8 +17,6 @@ pub use pe::rebase_loaded_image;
 const PL011: *mut u32 = 0x0900_0000 as *mut u32;
 const UARTFR: usize = 0x18 / 4;
 const UART_TXFF: u32 = 1 << 5;
-const EFI_RESET_SHUTDOWN: u32 = 2;
-const EFI_SUCCESS: usize = 0;
 const EFI_LOADER_CODE: u32 = 1;
 const EFI_LOADER_DATA: u32 = 2;
 const EFI_BOOT_SERVICES_CODE: u32 = 3;
@@ -80,11 +79,31 @@ struct UefiMemoryDescriptor {
 /// `boot_info` must identify a valid, immutable `BootInfo`. Its memory-map
 /// buffer must remain allocated for the lifetime of the kernel. Firmware has
 /// left the PL011 at `0x0900_0000` and the image mapped.
+#[repr(C, align(16))]
+struct KernelStack([u8; 64 * 1024]);
+
+static mut KERNEL_STACK: KernelStack = KernelStack([0; 64 * 1024]);
+
 pub unsafe extern "C" fn kernel_entry(boot_info: *const BootInfo) -> ! {
+    let stack_top = core::ptr::addr_of_mut!(KERNEL_STACK).cast::<u8>().add(64 * 1024);
+    core::arch::asm!(
+        "msr daifset, #0xf",
+        "msr spsel, #1",
+        "mov sp, {stack}",
+        "mov x0, {info}",
+        "br {entry}",
+        stack = in(reg) stack_top,
+        info = in(reg) boot_info,
+        entry = in(reg) kernel_main as *const () as usize,
+        options(noreturn),
+    );
+}
+
+unsafe extern "C" fn kernel_main(boot_info: *const BootInfo) -> ! {
     serial_write(b"ginux: booting\r\n");
     serial_write(b"ginux: kernel entered after ExitBootServices\r\n");
-    serial_write(b"ginux: aarch64 synchronization primitives are not ported\r\n");
-    serial_write(b"ginux: UEFI stack still active\r\n");
+    serial_write(b"ginux: daif masked\r\n");
+    serial_write(b"ginux: arm kernel stack active\r\n");
 
     if boot_info.is_null() {
         kernel_fail(b"ginux: missing boot information\r\n");
@@ -114,7 +133,6 @@ pub unsafe extern "C" fn kernel_entry(boot_info: *const BootInfo) -> ! {
         kernel_fail(b"ginux: invalid ACPI root pointer\r\n");
     }
     serial_write(b"ginux: ACPI root pointer validated\r\n");
-    serial_write(b"ginux: ACPI table walk is not ported\r\n");
 
     if boot_info.image_base.is_null() || boot_info.image_size == 0 {
         kernel_fail(b"ginux: invalid loaded EFI image bounds\r\n");
@@ -209,13 +227,15 @@ pub unsafe extern "C" fn kernel_entry(boot_info: *const BootInfo) -> ! {
     serial_write_u64(summary.loader_pages);
     serial_write(b"\r\n");
 
-    serial_write(b"ginux: aarch64 page tables are not ported\r\n");
-    serial_write(b"ginux: aarch64 physical frame allocator is not ported\r\n");
-    serial_write(b"ginux: aarch64 virtio PCI discovery is not ported\r\n");
-    serial_write(b"ginux: aarch64 APIC, SMP, and IOMMU are not ported\r\n");
-    serial_write(b"ginux: aarch64 Linux ABI is not ported\r\n");
-    serial_write(b"ginux: stopping before x86-only kernel path\r\n");
-    shutdown(boot_info);
+    arch::aarch64::platform::bring_up(arch::aarch64::Handoff {
+        rsdp: boot_info.acpi_rsdp,
+        memory_map: boot_info.memory_map,
+        memory_map_size: boot_info.memory_map_size,
+        descriptor_size: boot_info.memory_descriptor_size,
+        image_base: boot_info.image_base as u64,
+        image_size: boot_info.image_size as u64,
+        reset: boot_info.reset_system,
+    });
 }
 
 fn summarize_memory(boot_info: &BootInfo) -> MemorySummary {
@@ -302,16 +322,6 @@ unsafe fn checksum(bytes: *const u8, length: usize) -> u8 {
         sum = sum.wrapping_add(bytes.add(offset).read());
     }
     sum
-}
-
-fn shutdown(boot_info: &BootInfo) -> ! {
-    unsafe {
-        (boot_info.reset_system)(EFI_RESET_SHUTDOWN, EFI_SUCCESS, 0, core::ptr::null());
-    }
-    serial_write(b"ginux: firmware shutdown returned unexpectedly\r\n");
-    loop {
-        core::hint::spin_loop();
-    }
 }
 
 fn kernel_fail(message: &[u8]) -> ! {

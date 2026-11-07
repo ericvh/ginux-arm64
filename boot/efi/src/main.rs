@@ -268,6 +268,8 @@ static mut MEMORY_MAP_STORAGE: MemoryMapStorage = MemoryMapStorage([0; MEMORY_MA
 #[no_mangle]
 extern "efiapi" fn efi_main(image: EfiHandle, system_table: *mut EfiSystemTable) -> EfiStatus {
     serial_init();
+    #[cfg(target_arch = "aarch64")]
+    serial_write("ginux: arm uefi build\r\n");
 
     // SAFETY: UEFI supplies a valid system table and boot services are still
     // active. Nothing in this image has been modified yet, so a relocated

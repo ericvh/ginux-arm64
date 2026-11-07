@@ -23,59 +23,80 @@ arch-specific files instead of a second kernel tree.
 
 ## Non-goals
 
-- aarch64 page tables, the physical frame allocator, virtio PCI, APIC, SMP,
-  IOMMU, and the Linux syscall ABI.
+- The x86_64 Linux syscall surface in `cpu.rs` beyond `write`, `getpid`, and
+  `exit` on the Arm `svc` path.
 - Merging to fork `main` or opening a pull request on `gmkurtzer/ginux`.
 - Removing `macos-15-intel`.
+- `qemu-system-aarch64 -machine sbsa-ref`. This environment has no SBSA flash
+  image. The boot uses AAVMF on `virt` with GICv3, SMMUv3, and ACPI.
 
 ## Completed work
 
 - [x] x86_64 `ginux-boot.efi` builds with `cargo +1.99.0` for
   `x86_64-unknown-uefi` (PE32+ x86-64).
 - [x] aarch64 `ginux-boot.efi` builds for `aarch64-unknown-uefi`.
+- [x] Arm UEFI handoff installs AArch64 page tables, a frame allocator,
+  GICv3, the generic timer, PSCI, PCIe ECAM, and SMMUv3.
 - [x] `scripts/uefi-aarch64-guest.sh` captured the boot log below.
 - [x] `rustc --test kernel/src/pe.rs` passed 9 tests.
 
 ## Remaining work
 
 - [ ] Human review of the pull request.
-- [ ] aarch64 paging, frame allocation, virtio discovery, and the Linux ABI.
+- [ ] The rest of the x86_64 Linux syscall surface.
 
 ## Verification plan
 
 `make uefi-aarch64-guest` exits 0 and the log contains
-`ginux: kernel entered after ExitBootServices`,
-`ginux: signed boot manifest accepted`, and
-`ginux: stopping before x86-only kernel path`, with no
-`GINUX_KERNEL_PANIC`.
+`ginux: arm uefi build`, `ginux: aarch64 page tables on`,
+`ginux: timer-irq=`, `ginux: virtio pci device`, `ginux: smmuv3`,
+`ginux: svc=dispatch nr=172 result=4242`, and
+`ginux: sbsa arm services ready`, with no `GINUX_KERNEL_PANIC` and no
+`not ported`.
 
 ## Evidence
 
-Observed on 2026-11-06 under `qemu-system-aarch64 -machine virt` with AAVMF:
+Observed on 2026-11-06 under
+`qemu-system-aarch64 -machine virt,gic-version=3,iommu=smmuv3,acpi=on` with
+AAVMF and an `aarch64-unknown-uefi` image. QEMU exited 0 after
+`ResetSystem`.
 
 ```
-ginux: EFI image loaded at 0x5c669000 size 0xf7000
+ginux: arm uefi build
 ginux: kernel entered after ExitBootServices
-ginux: ACPI root pointer validated
-ginux: loaded EFI PE image accepted
-ginux: PE sections: 4
-ginux: signed boot manifest accepted
-ginux: manifest sequence: 1
-ginux: manifest authority grants: 12
-ginux: memory descriptors: 29
-ginux: usable memory MiB: 479
-ginux: aarch64 page tables are not ported
-ginux: aarch64 virtio PCI discovery is not ported
-ginux: aarch64 Linux ABI is not ported
-ginux: stopping before x86-only kernel path
+ginux: arm uefi sbsa handoff
+ginux: exception level 1
+ginux: acpi xsdt tables: 8
+ginux: gic version 3 distributor 0x8000000
+ginux: uart pl011 0x9000000
+ginux: generic timer gsiv 30
+ginux: physical frame allocator active
+ginux: aarch64 page tables on
+ginux: psci version 1.1 hvc
+ginux: psci secondary started
+ginux: timer-irq=30
+ginux: pcie ecam 0x4010000000
+ginux: virtio pci device 0x1001
+ginux: smmuv3 0x9050000 idr0 0xd44101a
+ginux: process=started
+ginux: svc=dispatch nr=64
+ginux-sbsa: process-write ok
+ginux: svc=dispatch nr=172 result=4242
+ginux: svc=dispatch nr=93
+ginux: process=exited
+ginux: sbsa arm services ready
 ```
 
 ## Decisions
 
 - The aarch64 entry shares the PE parser, measured-boot manifest, and
-  `BootInfo` contract. It stops before `arch::x86_64::pci`.
-- x86 serial stays on COM1. aarch64 serial is the virt PL011 at `0x09000000`.
+  `BootInfo` contract. Arm services live under `kernel/src/arch/aarch64/`
+  and are not linked into the x86_64 image.
+- x86 serial stays on COM1. aarch64 serial follows the SPCR UART and falls
+  back to the virt PL011 at `0x09000000`.
 - A missing GOP does not stop the aarch64 boot. The x86 boot still requires it.
+- The measured-boot blobs stay in the image. They are signed x86 bytes and
+  are not executed on this path.
 
 ## Review policy
 
