@@ -180,8 +180,12 @@ restarted as a host `fork`; traced process creation is `clone`. The security
 `ginux runtime` loads ELF64 for x86_64 and for aarch64. An aarch64 `_start`
 must be 4-byte aligned, and `svc #0` is the syscall the loader catches.
 `make gate1-aarch64-guest` loads that ELF and requires `GATE1: PASS`. The
-x86_64 decoder is unchanged. Native-supervision fixtures stay on `make build`
-because they are x86_64 assembly.
+x86_64 decoder is unchanged. `make gate1-x86_64-guest` runs the x86_64 daemon
+under `qemu-system-x86_64` with virtio-9p and requires the same gate 1 lines:
+emulated getpid 4242, mediated write not executed, uname denied with EPERM,
+bypass not observed, and `GATE1: PASS`. Set `GINUX_X86_64_KERNEL` to an
+x86_64 `bzImage`. Native-supervision fixtures stay on `make build` because
+they are x86_64 assembly.
 
 `qemu-aarch64-static` on an x86_64 host cannot ptrace an aarch64 tracee.
 `make gate1-aarch64-guest` runs that payload under `qemu-system-aarch64`.
