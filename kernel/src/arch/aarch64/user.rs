@@ -171,6 +171,27 @@ pub(crate) fn openat(dirfd: u64, path: u64) -> i64 {
     }
 }
 
+pub(crate) fn uname(pointer: u64) -> i64 {
+    if pointer == 0 {
+        return EFAULT;
+    }
+    let mut name = [0_u8; 65 * 6];
+    copy_field(&mut name[0..65], b"ginux");
+    copy_field(&mut name[65..130], b"ginux");
+    copy_field(&mut name[130..195], b"0.1.0");
+    copy_field(&mut name[195..260], b"sbsa");
+    copy_field(&mut name[260..325], b"aarch64");
+    copy_field(&mut name[325..390], b"(none)");
+    if !write_bytes(pointer, &name) {
+        return EFAULT;
+    }
+    0
+}
+
+fn copy_field(field: &mut [u8], value: &[u8]) {
+    field[..value.len()].copy_from_slice(value);
+}
+
 pub(crate) fn fstat(fd: u64, pointer: u64) -> i64 {
     if fd != DISK_FD || !disk_open() {
         return EBADF;

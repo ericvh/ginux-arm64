@@ -111,13 +111,7 @@ fn behavior(entry: &LinuxCall, args: [u64; 6]) -> i64 {
                 ENOMEM
             }
         }
-        CLASS_UNAME => {
-            if a0 == 0 {
-                EFAULT
-            } else {
-                EINVAL
-            }
-        }
+        CLASS_UNAME => super::user::uname(a0),
         CLASS_CLOCK => {
             if a1 == 0 {
                 EFAULT

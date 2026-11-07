@@ -266,6 +266,32 @@ _start:
     cmp x0, #0
     b.ne fail
 
+    mov x0, x19
+    mov x8, #160
+    svc #0
+    cmp x0, #0
+    b.ne fail
+    ldr x1, [x19]
+    movz x2, #0x6967
+    movk x2, #0x756e, lsl #16
+    movk x2, #0x0078, lsl #32
+    cmp x1, x2
+    b.ne fail
+    add x3, x19, #260
+    ldr x1, [x3]
+    movz x2, #0x6161
+    movk x2, #0x6372, lsl #16
+    movk x2, #0x3668, lsl #32
+    movk x2, #0x0034, lsl #48
+    cmp x1, x2
+    b.ne fail
+    mov x0, #1
+    adr x1, uname_msg
+    adr x2, uname_msg_end
+    sub x2, x2, x1
+    mov x8, #64
+    svc #0
+
     mov x0, #0
     mov x8, #93
     svc #0
@@ -326,6 +352,9 @@ disk_path:
 vda_msg:
     .ascii "ginux-sbsa: vda block 1048576\n"
 vda_msg_end:
+uname_msg:
+    .ascii "ginux-sbsa: uname aarch64\n"
+uname_msg_end:
 sector_write_msg:
     .ascii "ginux-sector-write\n"
 sector_write_msg_end:
