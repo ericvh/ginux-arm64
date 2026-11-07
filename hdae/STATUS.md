@@ -18,7 +18,8 @@
   later sector and write a sector back. `waitid` returns a child exit status
   and then forgets that child. `fstat` reports `/dev/vda` as a block device,
   `uname` reports `aarch64`, and `clock_gettime` returns the UEFI realtime
-  clock and the generic timer. Gates 9.75, 10, 11,
+  clock and the generic timer. The virtio disk carries an ext4 filesystem, and
+  `openat` of `/ginux.txt` reads that file. Gates 9.75, 10, 11,
   and 13 remain the upstream product sequence and have not been started by
   this port.
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
@@ -98,14 +99,14 @@ scope, threat model, and invariants.
   stacked on gate 18. Gate 9.75 remains the next upstream product checkpoint
   and is not the active fork task.
 - Last evidence: `make uefi-aarch64-guest` passed under AAVMF on virt with
-  GICv3 and SMMUv3. `fstat` reported `/dev/vda` as a 1048576-byte block
-  device, `uname` reported `aarch64`, and `clock_gettime` returned both the
-  UEFI realtime clock and a monotonic generic-timer value.
+  GICv3 and SMMUv3. The virtio disk is a 1048576-byte ext4 filesystem.
+  `openat` of `/ginux.txt` read `ginux-ext4-file`, `fstat` still reported the
+  block device, `uname` reported `aarch64`, and `clock_gettime` returned both
+  the UEFI realtime clock and a monotonic generic-timer value.
 - Open decision: Gate 9.75 must resolve the pre-boot hook execution context and
-  authority model before implementing hooks. The next bare-metal gap is a
-  filesystem on the virtio disk, which needs a format choice.
-- Exact next action: wait for a filesystem format choice before the next
-  bare-metal slice. Upstream gate 9.75 stays queued.
+  authority model before implementing hooks.
+- Exact next action: wait for human review of the ext4 file read. Upstream
+  gate 9.75 stays queued.
 
 ## Evidence
 
@@ -402,7 +403,7 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Wait for a filesystem format choice before the next bare-metal slice.
+Wait for human review of the ext4 file read on the bare-metal branch.
 Upstream gate 9.75 stays queued and is not this fork's next edit.
 
 ## Context recovery
@@ -412,10 +413,11 @@ Upstream gate 9.75 stays queued and is not this fork's next edit.
 - Reload after context shift: required
 - Active gate: 19, the AArch64 Linux svc table on the UEFI SBSA boot. Gate
   9.75 remains the next upstream product checkpoint and has not started.
-- Last evidence: `make uefi-aarch64-guest` passed under AAVMF. `fstat`
-  reported a 1048576-byte block device, `uname` reported `aarch64`, and
-  `clock_gettime` returned realtime and monotonic times. Gates 9 and 9.5
-  were accepted by the human on 2026-11-06.
+- Last evidence: `make uefi-aarch64-guest` passed under AAVMF. The virtio
+  disk is ext4, and `openat` of `/ginux.txt` read `ginux-ext4-file`.
+  `fstat` still reported a 1048576-byte block device, `uname` reported
+  `aarch64`, and `clock_gettime` returned realtime and monotonic times.
+  Gates 9 and 9.5 were accepted by the human on 2026-11-06.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive domain configuration,

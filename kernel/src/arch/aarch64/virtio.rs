@@ -6,8 +6,6 @@ const VIRTIO_BLK_TRANSITIONAL: u16 = 0x1001;
 const VIRTIO_BLK_MODERN: u16 = 0x1042;
 const SECTOR_BYTES: usize = 512;
 const QUEUE_SIZE: u16 = 8;
-const MARK: &[u8] = b"ginux-virtio-block";
-
 const ACKNOWLEDGE: u8 = 1;
 const DRIVER: u8 = 2;
 const DRIVER_OK: u8 = 4;
@@ -181,22 +179,10 @@ pub(crate) fn drive_block(
     if !setup(common, notify, caps.notify_multiplier, device_cfg, frames) {
         return false;
     }
-    let mut sector = [0_u8; SECTOR_BYTES];
-    if !sector_io(0, false, &mut sector) {
+    if !super::ext4::mount() {
         return false;
     }
-    if sector.get(..MARK.len()) != Some(MARK) {
-        uart::write(b"ginux: virtio-blk sector mismatch ");
-        let mut word = [0_u8; 8];
-        word.copy_from_slice(&sector[..8]);
-        uart::write_hex(u64::from_le_bytes(word));
-        uart::write(b"\r\n");
-        return false;
-    }
-    unsafe {
-        SECTOR = sector;
-        READY = true;
-    }
+    unsafe { READY = true };
     uart::write(b"ginux: virtio-blk read ok\r\n");
     true
 }

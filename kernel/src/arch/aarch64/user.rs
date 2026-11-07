@@ -1,6 +1,6 @@
 use super::memory::Frames;
 use super::paging::{self, AddressSpace, UserPage};
-use super::{platform, timer, uart, virtio};
+use super::{ext4, platform, timer, uart, virtio};
 
 const PAGE: u64 = 4096;
 const USER_BASE: u64 = 0x2000_0000;
@@ -27,9 +27,11 @@ const EBADF: i64 = -9;
 const ENOMEM: i64 = -12;
 const EFAULT: i64 = -14;
 const EINVAL: i64 = -22;
+const EROFS: i64 = -30;
 
 const AT_FDCWD: u64 = (-100_i64) as u64;
 const DISK_FD: u64 = 3;
+const FILE_FD: u64 = 4;
 const DISK_PATH: &[u8] = b"/dev/vda";
 
 #[derive(Clone, Copy)]
@@ -55,6 +57,11 @@ struct State {
     mmap_next: u64,
     disk_open: bool,
     disk_pos: u64,
+    file_open: bool,
+    file_inode: u32,
+    file_mode: u16,
+    file_size: u64,
+    file_pos: u64,
 }
 
 static mut STATE: Option<State> = None;
@@ -138,6 +145,11 @@ pub(crate) fn load(
             mmap_next: MMAP_BASE,
             disk_open: false,
             disk_pos: 0,
+            file_open: false,
+            file_inode: 0,
+            file_mode: 0,
+            file_size: 0,
+            file_pos: 0,
         });
     }
     uart::write(b"ginux: controller elf loaded\r\n");
@@ -158,16 +170,35 @@ pub(crate) fn openat(dirfd: u64, path: u64) -> i64 {
         return EIO;
     }
     match path_eq(path, DISK_PATH) {
-        Err(errno) => errno,
-        Ok(false) => ENOENT,
+        Err(errno) => return errno,
         Ok(true) => {
             let Some(state) = state() else {
                 return EIO;
             };
             state.disk_open = true;
             state.disk_pos = 0;
-            DISK_FD as i64
+            return DISK_FD as i64;
         }
+        Ok(false) => {}
+    }
+    let mut raw = [0_u8; 64];
+    let length = match read_cstr(path, &mut raw) {
+        Ok(length) => length,
+        Err(errno) => return errno,
+    };
+    match ext4::lookup(&raw[..length]) {
+        Ok(file) => {
+            let Some(state) = state() else {
+                return EIO;
+            };
+            state.file_open = true;
+            state.file_inode = file.number;
+            state.file_mode = file.mode;
+            state.file_size = file.size;
+            state.file_pos = 0;
+            FILE_FD as i64
+        }
+        Err(errno) => errno,
     }
 }
 
@@ -209,6 +240,21 @@ fn copy_field(field: &mut [u8], value: &[u8]) {
 }
 
 pub(crate) fn fstat(fd: u64, pointer: u64) -> i64 {
+    if fd == FILE_FD && file_open() {
+        let size = file_size();
+        let mode = u32::from(file_mode());
+        let inode = u64::from(file_inode());
+        let mut stat = [0_u8; 128];
+        stat[8..16].copy_from_slice(&inode.to_le_bytes());
+        stat[16..20].copy_from_slice(&mode.to_le_bytes());
+        stat[20..24].copy_from_slice(&1_u32.to_le_bytes());
+        stat[48..56].copy_from_slice(&size.to_le_bytes());
+        stat[56..60].copy_from_slice(&4096_u32.to_le_bytes());
+        if !write_bytes(pointer, &stat) {
+            return EFAULT;
+        }
+        return 0;
+    }
     if fd != DISK_FD || !disk_open() {
         return EBADF;
     }
@@ -228,6 +274,12 @@ pub(crate) fn fstat(fd: u64, pointer: u64) -> i64 {
 }
 
 pub(crate) fn close(fd: u64) -> i64 {
+    if fd == FILE_FD && file_open() {
+        if let Some(state) = state() {
+            state.file_open = false;
+        }
+        return 0;
+    }
     if fd == DISK_FD && disk_open() {
         if let Some(state) = state() {
             state.disk_open = false;
@@ -238,13 +290,23 @@ pub(crate) fn close(fd: u64) -> i64 {
 }
 
 pub(crate) fn lseek(fd: u64, offset: u64, whence: u64) -> i64 {
-    if fd != DISK_FD || !disk_open() {
+    let (open, current, end) = if fd == FILE_FD && file_open() {
+        (true, file_pos(), file_size())
+    } else if fd == DISK_FD && disk_open() {
+        (
+            true,
+            disk_pos(),
+            virtio::capacity_sectors().saturating_mul(SECTOR),
+        )
+    } else {
+        (false, 0, 0)
+    };
+    if !open {
         return EBADF;
     }
-    let end = virtio::capacity_sectors().saturating_mul(SECTOR);
     let next = match whence {
         0 => offset as i64,
-        1 => match (disk_pos() as i64).checked_add(offset as i64) {
+        1 => match (current as i64).checked_add(offset as i64) {
             Some(value) => value,
             None => return EINVAL,
         },
@@ -258,7 +320,11 @@ pub(crate) fn lseek(fd: u64, offset: u64, whence: u64) -> i64 {
         return EINVAL;
     }
     if let Some(state) = state() {
-        state.disk_pos = next as u64;
+        if fd == FILE_FD {
+            state.file_pos = next as u64;
+        } else {
+            state.disk_pos = next as u64;
+        }
     }
     next
 }
@@ -278,6 +344,9 @@ pub(crate) fn pwrite(fd: u64, pointer: u64, length: u64, offset: u64) -> i64 {
 }
 
 pub(crate) fn write(fd: u64, pointer: u64, length: u64) -> i64 {
+    if fd == FILE_FD {
+        return EROFS;
+    }
     if fd == DISK_FD {
         return block_write(pointer, length, disk_pos(), true);
     }
@@ -306,6 +375,9 @@ pub(crate) fn write(fd: u64, pointer: u64, length: u64) -> i64 {
 }
 
 pub(crate) fn read(fd: u64, pointer: u64, length: u64) -> i64 {
+    if fd == FILE_FD {
+        return file_read(pointer, length, file_pos(), true);
+    }
     if fd == DISK_FD {
         return block_read(pointer, length, disk_pos(), true);
     }
@@ -336,6 +408,71 @@ const SECTOR: u64 = 512;
 
 fn disk_open() -> bool {
     state().is_some_and(|state| state.disk_open)
+}
+
+fn file_open() -> bool {
+    state().is_some_and(|state| state.file_open)
+}
+
+fn file_inode() -> u32 {
+    state().map(|state| state.file_inode).unwrap_or(0)
+}
+
+fn file_mode() -> u16 {
+    state().map(|state| state.file_mode).unwrap_or(0)
+}
+
+fn file_size() -> u64 {
+    state().map(|state| state.file_size).unwrap_or(0)
+}
+
+fn file_pos() -> u64 {
+    state().map(|state| state.file_pos).unwrap_or(0)
+}
+
+fn read_cstr(pointer: u64, dest: &mut [u8]) -> Result<usize, i64> {
+    let mut byte = [0_u8; 1];
+    for index in 0..dest.len() {
+        if !read_bytes(pointer + index as u64, &mut byte) {
+            return Err(EFAULT);
+        }
+        if byte[0] == 0 {
+            return Ok(index);
+        }
+        dest[index] = byte[0];
+    }
+    Err(EINVAL)
+}
+
+fn file_read(pointer: u64, length: u64, offset: u64, update: bool) -> i64 {
+    if !file_open() {
+        return EBADF;
+    }
+    let end = file_size();
+    if offset > end {
+        return EINVAL;
+    }
+    if offset == end || length == 0 {
+        return 0;
+    }
+    let size = (length.min(end - offset) as usize).min(MAX_WRITE);
+    let mut buffer = [0_u8; MAX_WRITE];
+    let Some(copied) = ext4::read(file_inode(), offset, &mut buffer[..size]) else {
+        return EIO;
+    };
+    let Some(state) = state() else {
+        return EFAULT;
+    };
+    if !covers(state, pointer, copied as u64) {
+        return EFAULT;
+    }
+    unsafe {
+        core::ptr::copy_nonoverlapping(buffer.as_ptr(), pointer as *mut u8, copied);
+    }
+    if update {
+        state.file_pos = offset + copied as u64;
+    }
+    copied as i64
 }
 
 fn disk_pos() -> u64 {

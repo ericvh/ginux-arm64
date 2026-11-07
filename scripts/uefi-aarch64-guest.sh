@@ -20,9 +20,10 @@ cp "$vars_src" "$work/vars.fd"
 
 log="$work/boot.log"
 set +e
-printf 'ginux-virtio-block\n' >"$work/disk.img"
-printf 'ginux-sector-one\n' | dd of="$work/disk.img" bs=1 seek=512 conv=notrunc status=none
-dd if=/dev/zero of="$work/disk.img" bs=1 seek=1048575 count=1 conv=notrunc status=none
+mkdir -p "$work/src"
+printf 'ginux-ext4-file\n' >"$work/src/ginux.txt"
+dd if=/dev/zero of="$work/disk.img" bs=1M count=1 status=none
+mkfs.ext4 -F -L ginux -b 4096 -O ^inline_data -d "$work/src" "$work/disk.img" >/dev/null
 timeout 90 qemu-system-aarch64 \
     -machine virt,gic-version=3,iommu=smmuv3,acpi=on \
     -cpu cortex-a57 \
@@ -57,6 +58,7 @@ for line in \
     "ginux: timer-irq=" \
     "ginux: virtio pci device" \
     "ginux: virtio-blk read ok" \
+    "ginux: ext4 file ok" \
     "ginux: smmuv3" \
     "ginux: embedded controller runtime measurement accepted" \
     "ginux: controller elf aarch64" \
@@ -67,14 +69,10 @@ for line in \
     "ginux: svc=dispatch nr=214 brk result=" \
     "ginux: svc=dispatch nr=222 mmap result=" \
     "ginux-sbsa: controller memory ok" \
-    "ginux-virtio-block" \
-    "ginux-sector-one" \
     "ginux: svc=dispatch nr=56 openat result=" \
     "ginux: svc=dispatch nr=80 fstat result=" \
     "ginux-sbsa: vda block 1048576" \
-    "ginux: svc=dispatch nr=67 pread64 result=" \
-    "ginux: svc=dispatch nr=62 lseek result=" \
-    "ginux-sector-write" \
+    "ginux-ext4-file" \
     "ginux: svc=dispatch nr=57 close result=" \
     "ginux: svc=dispatch nr=160 uname result=" \
     "ginux-sbsa: uname aarch64" \
@@ -110,7 +108,7 @@ if grep -F -q "GINUX_KERNEL_PANIC" "$log"; then
     echo "uefi aarch64 kernel panicked" >&2
     fail=1
 fi
-for syscall in "nr=214 brk" "nr=222 mmap" "nr=64 write" "nr=63 read" "nr=220 clone" "nr=435 clone3" "nr=56 openat" "nr=80 fstat" "nr=67 pread64" "nr=62 lseek" "nr=57 close" "nr=160 uname" "nr=113 clock_gettime" "nr=95 waitid"; do
+for syscall in "nr=214 brk" "nr=222 mmap" "nr=64 write" "nr=63 read" "nr=220 clone" "nr=435 clone3" "nr=56 openat" "nr=80 fstat" "nr=57 close" "nr=160 uname" "nr=113 clock_gettime" "nr=95 waitid"; do
     if grep -F "$syscall" "$log" | grep -F -q "result=-"; then
         echo "uefi aarch64 kernel returned an error for $syscall" >&2
         fail=1

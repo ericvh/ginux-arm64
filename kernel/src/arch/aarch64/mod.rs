@@ -1,4 +1,6 @@
 pub(crate) mod acpi;
+#[allow(static_mut_refs)]
+pub(crate) mod ext4;
 pub(crate) mod gic;
 pub(crate) mod linux;
 pub(crate) mod memory;

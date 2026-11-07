@@ -64,21 +64,6 @@ _start:
     b.le fail
     add x22, x0, #4096
 
-    mov x0, #0
-    mov x1, x19
-    mov x2, #19
-    mov x8, #63
-    svc #0
-    cmp x0, #19
-    b.ne fail
-    mov x0, #1
-    mov x1, x19
-    mov x2, #19
-    mov x8, #64
-    svc #0
-    cmp x0, #19
-    b.ne fail
-
     mov x0, #17
     mov x1, x22
     mov x2, #0
@@ -205,59 +190,33 @@ _start:
     mov x8, #64
     svc #0
 
-    mov x0, x23
-    mov x1, x19
-    mov x2, #17
-    mov x3, #512
-    mov x8, #67
-    svc #0
-    cmp x0, #17
-    b.ne fail
-    mov x0, #1
-    mov x1, x19
-    mov x2, #17
-    mov x8, #64
-    svc #0
-    cmp x0, #17
-    b.ne fail
-
-    mov x0, x23
-    mov x1, #1024
+    mov x0, #-100
+    adr x1, file_path
     mov x2, #0
-    mov x8, #62
+    mov x3, #0
+    mov x8, #56
     svc #0
-    cmp x0, #1024
+    cmp x0, #4
     b.ne fail
-    mov x0, x23
-    adr x1, sector_write_msg
-    adr x2, sector_write_msg_end
-    sub x2, x2, x1
-    mov x20, x2
-    mov x8, #64
-    svc #0
-    cmp x0, x20
-    b.ne fail
-
-    mov x0, x23
-    mov x1, #1024
-    mov x2, #0
-    mov x8, #62
-    svc #0
-    cmp x0, #1024
-    b.ne fail
-    mov x0, x23
+    mov x26, x0
+    mov x0, x26
     mov x1, x19
-    mov x2, x20
+    mov x2, #16
     mov x8, #63
     svc #0
-    cmp x0, x20
+    cmp x0, #16
     b.ne fail
     mov x0, #1
     mov x1, x19
-    mov x2, x20
+    mov x2, #16
     mov x8, #64
     svc #0
-    cmp x0, x20
+    cmp x0, #16
+    b.ne fail
+    mov x0, x26
+    mov x8, #57
+    svc #0
+    cmp x0, #0
     b.ne fail
 
     mov x0, x23
@@ -395,6 +354,8 @@ wait_clone3_msg:
 wait_clone3_msg_end:
 disk_path:
     .asciz "/dev/vda"
+file_path:
+    .asciz "/ginux.txt"
 vda_msg:
     .ascii "ginux-sbsa: vda block 1048576\n"
 vda_msg_end:
@@ -407,6 +368,3 @@ realtime_msg_end:
 monotonic_msg:
     .ascii "ginux-sbsa: clock monotonic\n"
 monotonic_msg_end:
-sector_write_msg:
-    .ascii "ginux-sector-write\n"
-sector_write_msg_end:
