@@ -6,9 +6,11 @@
   16, and 17 are technically passed and awaiting human review of their pull
   requests. The x86_64 gate 1 guest and the aarch64 native `brk #0` fix are
   stacked above that port. The virt kernel enables the MMU, takes a timer
-  interrupt, starts one EL0 process, and dispatches `svc #0`. It is not a
-  port of the x86_64 UEFI kernel. Gates 9.75, 10, 11, and 13 remain the
-  upstream product sequence and have not been started by this port.
+  interrupt, starts one EL0 process, and dispatches `svc #0`. The historical
+  UEFI kernel now also builds for aarch64 and stops after the measured-boot
+  handoff, before paging, virtio PCI, and the Linux ABI. Gates 9.75, 10, 11,
+  and 13 remain the upstream product sequence and have not been started by
+  this port.
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
   architecture. Pull request https://github.com/gmkurtzer/ginux-us/pull/1 was
   merged by the human on 2026-11-04.
@@ -82,10 +84,10 @@ scope, threat model, and invariants.
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: EL0 process start and `svc` dispatch in the virt kernel,
-  stacked on the MMU and timer boot. Gate 17 remains technically passed and
-  awaiting human review. Gate 9.75 remains the next upstream product
-  checkpoint and is not the active fork task.
+- Active gate: 18, the aarch64 port of the historical UEFI kernel, stacked
+  on the virt process boot. Gate 17 remains technically passed and awaiting
+  human review. Gate 9.75 remains the next upstream product checkpoint and
+  is not the active fork task.
 - Last evidence: `make test-systemd-interactive` passed from a clean isolated
   overlay with `ps -ef` at 309 ms, `top -b -n 1` at 913 ms, and valid Bash
   timing fields, plus cold acquisition, offline cache reuse, retained domain
@@ -392,17 +394,17 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Wait for human review of the three arm64 pull requests. Upstream gate 9.75
-stays queued and is not this fork's next edit.
+Wait for human review of the arm64 pull requests, including the UEFI kernel
+port. Upstream gate 9.75 stays queued and is not this fork's next edit.
 
 ## Context recovery
 
 - Active skill: `hdae-development`
 - Skill path: `.agents/skills/hdae-development/SKILL.md`
 - Reload after context shift: required
-- Active gate: 17, technically passed. The arm64 batch is complete pending
-  human review. Gate 9.75 remains the next upstream product checkpoint and
-  has not started.
+- Active gate: 18, the aarch64 port of the historical UEFI kernel. Gate 17
+  remains technically passed and awaiting human review. Gate 9.75 remains
+  the next upstream product checkpoint and has not started.
 - Last evidence: `make demo-gate-9.5`, `make test-systemd-interactive`,
   `make test-systemd`, `make test`, and `make check` passed. The isolated
   interactive run measured `ps -ef` at 309 ms and `top -b -n 1` at 913 ms,

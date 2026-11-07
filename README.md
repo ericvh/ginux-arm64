@@ -201,10 +201,23 @@ guest mounts the daemon and fixture with virtio-9p, tag `hostshare`, at
 ## Legacy kernel
 
 The x86_64 UEFI kernel is preserved on `bootable-kernel` at tag
-`bootable-kernel-final` (the same commit as upstream). Build and boot that
-tree with its own `make build` and `make run` (`qemu-system-x86_64`).
+`bootable-kernel-final` (the same commit as upstream). This tree also carries
+that kernel under `kernel/` and `boot/efi/`. The x86_64 UEFI target is
+unchanged: `cargo +1.99.0 build -p ginux-boot --target x86_64-unknown-uefi`.
+The aarch64 image is the same bootloader and kernel crate. It shares the PE
+image check and the measured-boot manifest, then stops before the x86_64 page
+tables, virtio PCI discovery, and Linux ABI:
 
-The aarch64 virt kernel in this tree is `legacy-kernel/`. It drops to EL1,
+```sh
+make uefi-aarch64-guest
+```
+
+`make uefi-aarch64-guest` boots `ginux-boot.efi` with AAVMF under
+`qemu-system-aarch64 -machine virt` and expects
+`ginux: kernel entered after ExitBootServices` followed by
+`ginux: stopping before x86-only kernel path`.
+
+The smaller virt kernel in this tree is `legacy-kernel/`. It drops to EL1,
 installs exception vectors, identity-maps RAM and the virt MMIO frame,
 enables the MMU, and takes one ARM generic-timer interrupt through the GICv2.
 It then starts one EL0 process. That process enters the kernel with `svc #0`;

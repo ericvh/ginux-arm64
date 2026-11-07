@@ -1,5 +1,14 @@
 [workspace]
 members = [
+    "boot/efi",
+    "kernel",
+    "crates/image-store",
+    "crates/kernel-policy",
+    "crates/native-abi",
+    "crates/oci",
+    "crates/oci-cache",
+    "crates/volume-format",
+    "crates/volume-service",
     "crates/baseline-runner",
     "crates/ginux-core",
     "crates/ginux-domain",
@@ -15,6 +24,9 @@ members = [
     "crates/runtime-fixture",
 ]
 resolver = "2"
+
+[workspace.package]
+license = "Apache-2.0"
 
 [profile.release]
 codegen-units = 1
