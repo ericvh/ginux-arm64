@@ -72,6 +72,18 @@ pub(crate) fn map_user_page(
     Some(())
 }
 
+pub(crate) fn map_device(
+    space: &AddressSpace,
+    frames: &mut Frames,
+    start: u64,
+    length: u64,
+) -> Option<()> {
+    let end = start.checked_add(length)?;
+    map_range(frames, space.tables.l0, start, end, true)?;
+    unsafe { asm_barrier() };
+    Some(())
+}
+
 fn map_range(frames: &mut Frames, l0: u64, start: u64, end: u64, device: bool) -> Option<()> {
     if start >= end {
         return Some(());

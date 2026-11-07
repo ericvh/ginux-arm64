@@ -1,6 +1,6 @@
 use super::memory::Frames;
 use super::paging::{self, AddressSpace, UserPage};
-use super::{platform, uart};
+use super::{platform, uart, virtio};
 
 const PAGE: u64 = 4096;
 const USER_BASE: u64 = 0x2000_0000;
@@ -21,6 +21,7 @@ const PT_LOAD: u32 = 1;
 const PF_EXECUTE: u32 = 1;
 const PF_WRITE: u32 = 2;
 
+const EIO: i64 = -5;
 const EBADF: i64 = -9;
 const ENOMEM: i64 = -12;
 const EFAULT: i64 = -14;
@@ -163,6 +164,50 @@ pub(crate) fn write(fd: u64, pointer: u64, length: u64) -> i64 {
     }
     uart::write(&buffer[..size]);
     length as i64
+}
+
+pub(crate) fn read(fd: u64, pointer: u64, length: u64) -> i64 {
+    if fd != 0 {
+        return EBADF;
+    }
+    if length == 0 {
+        return 0;
+    }
+    let data = virtio::block_bytes();
+    if data.is_empty() {
+        return EIO;
+    }
+    let size = length.min(data.len() as u64).min(MAX_WRITE as u64) as usize;
+    let Some(state) = state() else {
+        return EFAULT;
+    };
+    if !covers(state, pointer, size as u64) {
+        return EFAULT;
+    }
+    unsafe {
+        core::ptr::copy_nonoverlapping(data.as_ptr(), pointer as *mut u8, size);
+    }
+    size as i64
+}
+
+pub(crate) fn read_bytes(pointer: u64, dest: &mut [u8]) -> bool {
+    let Some(state) = state() else {
+        return false;
+    };
+    if dest.is_empty() || !covers(state, pointer, dest.len() as u64) {
+        return false;
+    }
+    unsafe {
+        core::ptr::copy_nonoverlapping(pointer as *const u8, dest.as_mut_ptr(), dest.len());
+    }
+    true
+}
+
+pub(crate) fn stack_ok(top: u64) -> bool {
+    let Some(state) = state() else {
+        return false;
+    };
+    top >= 16 && top & 15 == 0 && covers(state, top - 16, 16)
 }
 
 pub(crate) fn brk(address: u64) -> i64 {

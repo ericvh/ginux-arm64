@@ -131,6 +131,8 @@ fn behavior(entry: &LinuxCall, args: [u64; 6]) -> i64 {
         CLASS_IO | CLASS_FD => {
             if entry.name == "write" {
                 super::user::write(a0, a1, a2)
+            } else if entry.name == "read" {
+                super::user::read(a0, a1, a2)
             } else {
                 EBADF
             }

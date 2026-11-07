@@ -12,6 +12,8 @@ pub(crate) mod timer;
 pub(crate) mod uart;
 #[allow(static_mut_refs)]
 pub(crate) mod user;
+#[allow(static_mut_refs)]
+pub(crate) mod virtio;
 
 use core::ffi::c_void;
 

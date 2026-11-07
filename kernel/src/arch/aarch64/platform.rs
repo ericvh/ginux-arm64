@@ -1,6 +1,8 @@
 use super::acpi::Platform;
 use super::memory::MapRange;
-use super::{acpi, gic, memory, paging, pci, psci, smmu, syscall, timer, uart, user, Handoff};
+use super::{
+    acpi, gic, memory, paging, pci, psci, smmu, syscall, timer, uart, user, virtio, Handoff,
+};
 
 static mut RESET: Option<super::ResetSystem> = None;
 
@@ -147,6 +149,7 @@ pub(crate) fn bring_up(handoff: Handoff) -> ! {
     uart::write(b"ginux: pcie ecam ");
     uart::write_hex(platform.ecam);
     uart::write(b"\r\n");
+    let mut drove_block = false;
     for device in &virtio[..found] {
         uart::write(b"ginux: virtio pci device ");
         uart::write_hex(u64::from(device.device_id));
@@ -167,6 +170,28 @@ pub(crate) fn bring_up(handoff: Handoff) -> ! {
     uart::write(b" idr0 ");
     uart::write_hex(u64::from(idr0));
     uart::write(b"\r\n");
+    if !smmu::bypass(platform.smmu) {
+        halt(b"ginux: smmu bypass failed\r\n");
+    }
+    for device in &virtio[..found] {
+        if device.device_id == 0x1001 || device.device_id == 0x1042 {
+            if !virtio::drive_block(
+                &space,
+                &mut frames,
+                platform.ecam,
+                platform.ecam_start_bus,
+                device.bus,
+                device.device,
+                device.device_id,
+            ) {
+                halt(b"ginux: virtio-blk setup failed\r\n");
+            }
+            drove_block = true;
+        }
+    }
+    if !drove_block {
+        halt(b"ginux: virtio-blk missing\r\n");
+    }
 
     let Some(loaded) = user::load(frames, &space, handoff.controller, handoff.controller_size)
     else {

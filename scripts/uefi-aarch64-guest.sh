@@ -20,7 +20,8 @@ cp "$vars_src" "$work/vars.fd"
 
 log="$work/boot.log"
 set +e
-dd if=/dev/zero of="$work/disk.img" bs=1M count=1 status=none
+printf 'ginux-virtio-block\n' >"$work/disk.img"
+dd if=/dev/zero of="$work/disk.img" bs=1 seek=1048575 count=1 conv=notrunc status=none
 timeout 90 qemu-system-aarch64 \
     -machine virt,gic-version=3,iommu=smmuv3,acpi=on \
     -cpu cortex-a57 \
@@ -54,6 +55,7 @@ for line in \
     "ginux: psci version" \
     "ginux: timer-irq=" \
     "ginux: virtio pci device" \
+    "ginux: virtio-blk read ok" \
     "ginux: smmuv3" \
     "ginux: embedded controller runtime measurement accepted" \
     "ginux: controller elf aarch64" \
@@ -64,6 +66,14 @@ for line in \
     "ginux: svc=dispatch nr=214 brk result=" \
     "ginux: svc=dispatch nr=222 mmap result=" \
     "ginux-sbsa: controller memory ok" \
+    "ginux-virtio-block" \
+    "ginux: svc=dispatch nr=63 read result=" \
+    "ginux-sbsa: clone child ok" \
+    "ginux: svc=dispatch nr=220 clone result=" \
+    "ginux-sbsa: clone parent ok" \
+    "ginux-sbsa: clone3 child ok" \
+    "ginux: svc=dispatch nr=435 clone3 result=" \
+    "ginux-sbsa: clone3 parent ok" \
     "ginux: svc=dispatch nr=93" \
     "ginux: process=exited" \
     "ginux: sbsa arm services ready"
@@ -81,7 +91,7 @@ if grep -F -q "GINUX_KERNEL_PANIC" "$log"; then
     echo "uefi aarch64 kernel panicked" >&2
     fail=1
 fi
-for syscall in "nr=214 brk" "nr=222 mmap" "nr=64 write"; do
+for syscall in "nr=214 brk" "nr=222 mmap" "nr=64 write" "nr=63 read" "nr=220 clone" "nr=435 clone3"; do
     if grep -F "$syscall" "$log" | grep -F -q "result=-"; then
         echo "uefi aarch64 kernel returned an error for $syscall" >&2
         fail=1

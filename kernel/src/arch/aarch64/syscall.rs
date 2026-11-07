@@ -145,17 +145,47 @@ extern "C" fn ginux_on_svc(frame: *mut u64) {
     let number = unsafe { frame.add(8).read() };
     let args = [0, 1, 2, 3, 4, 5].map(|index| unsafe { frame.add(index).read() });
     if number == 172 {
-        linux::note(172);
-        uart::write(b"ginux: svc=dispatch nr=172 result=4242\r\n");
-        unsafe { frame.write(4242) };
+        let pid = current_pid();
+        log_result(172, b"getpid", pid as i64);
+        unsafe { frame.write(pid) };
         return;
+    }
+    if number == 220 || number == 435 {
+        let name: &[u8] = if number == 220 { b"clone" } else { b"clone3" };
+        let child_sp = if number == 220 {
+            args[1]
+        } else {
+            match clone3_stack(args[0], args[1]) {
+                Ok(top) => top,
+                Err(errno) => {
+                    log_result(number, name, errno);
+                    unsafe { frame.write(errno as u64) };
+                    return;
+                }
+            }
+        };
+        match spawn(frame, child_sp) {
+            Ok(pid) => {
+                log_result(number, name, pid as i64);
+                return;
+            }
+            Err(errno) => {
+                log_result(number, name, errno);
+                unsafe { frame.write(errno as u64) };
+                return;
+            }
+        }
     }
     if number == 93 {
         linux::note(93);
+        uart::write(b"ginux: svc=dispatch nr=93\r\n");
+        if resume_parent(frame) {
+            uart::write(b"ginux: clone child returned\r\n");
+            return;
+        }
         uart::write(b"ginux: aarch64 svc table unique=");
         uart::write_u64(u64::from(linux::unique()));
         uart::write(b"\r\n");
-        uart::write(b"ginux: svc=dispatch nr=93\r\n");
         uart::write(b"ginux: process=exited\r\n");
         super::platform::finish();
     }
@@ -177,6 +207,127 @@ extern "C" fn ginux_on_fault() {
         core::arch::asm!("mrs {v}, esr_el1", v = out(reg) esr, options(nostack, nomem));
     }
     fault(esr);
+}
+
+const PARENT_PID: u64 = 4242;
+const EFAULT: i64 = -14;
+const EAGAIN: i64 = -11;
+const EINVAL: i64 = -22;
+
+struct Saved {
+    elr: u64,
+    spsr: u64,
+    sp: u64,
+    regs: [u64; 10],
+}
+
+static mut CURRENT: u64 = PARENT_PID;
+static mut NEXT_PID: u64 = PARENT_PID + 1;
+static mut SAVED: Option<Saved> = None;
+
+fn current_pid() -> u64 {
+    unsafe { CURRENT }
+}
+
+fn clone3_stack(pointer: u64, size: u64) -> Result<u64, i64> {
+    if size < 64 {
+        return Err(EINVAL);
+    }
+    let mut raw = [0_u8; 64];
+    if !super::user::read_bytes(pointer, &mut raw) {
+        return Err(EFAULT);
+    }
+    let stack = u64::from_le_bytes(raw[40..48].try_into().unwrap());
+    let stack_size = u64::from_le_bytes(raw[48..56].try_into().unwrap());
+    let Some(top) = stack.checked_add(stack_size) else {
+        return Err(EINVAL);
+    };
+    if top == 0 {
+        return Err(EINVAL);
+    }
+    Ok(top & !15)
+}
+
+#[allow(static_mut_refs)]
+fn spawn(frame: *mut u64, child_sp: u64) -> Result<u64, i64> {
+    if unsafe { SAVED.is_some() } {
+        return Err(EAGAIN);
+    }
+    if !super::user::stack_ok(child_sp) {
+        return Err(EFAULT);
+    }
+    let elr: u64;
+    let spsr: u64;
+    let sp: u64;
+    unsafe {
+        core::arch::asm!(
+            "mrs {elr}, elr_el1",
+            "mrs {spsr}, spsr_el1",
+            "mrs {sp}, sp_el0",
+            elr = out(reg) elr,
+            spsr = out(reg) spsr,
+            sp = out(reg) sp,
+            options(nostack, nomem),
+        );
+    }
+    let mut regs = [0_u64; 10];
+    for index in 0..10 {
+        regs[index] = unsafe { frame.add(index).read() };
+    }
+    let pid = unsafe { NEXT_PID };
+    unsafe { NEXT_PID += 1 };
+    regs[0] = pid;
+    unsafe {
+        SAVED = Some(Saved {
+            elr,
+            spsr,
+            sp,
+            regs,
+        });
+        CURRENT = pid;
+        core::arch::asm!("msr sp_el0, {sp}", sp = in(reg) child_sp, options(nostack));
+        frame.write(0);
+    }
+    Ok(pid)
+}
+
+#[allow(static_mut_refs)]
+fn resume_parent(frame: *mut u64) -> bool {
+    let Some(saved) = (unsafe { SAVED.take() }) else {
+        return false;
+    };
+    unsafe {
+        CURRENT = PARENT_PID;
+        for index in 0..10 {
+            frame.add(index).write(saved.regs[index]);
+        }
+        core::arch::asm!(
+            "msr elr_el1, {elr}",
+            "msr spsr_el1, {spsr}",
+            "msr sp_el0, {sp}",
+            elr = in(reg) saved.elr,
+            spsr = in(reg) saved.spsr,
+            sp = in(reg) saved.sp,
+            options(nostack),
+        );
+    }
+    true
+}
+
+fn log_result(number: u64, name: &[u8], result: i64) {
+    linux::note(number);
+    uart::write(b"ginux: svc=dispatch nr=");
+    uart::write_u64(number);
+    uart::write(b" ");
+    uart::write(name);
+    uart::write(b" result=");
+    if result < 0 {
+        uart::write(b"-");
+        uart::write_u64((-result) as u64);
+    } else {
+        uart::write_u64(result as u64);
+    }
+    uart::write(b"\r\n");
 }
 
 fn fault(esr: u64) -> ! {
