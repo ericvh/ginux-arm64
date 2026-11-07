@@ -113,12 +113,16 @@ if ! grep -q "GINUX_FIXTURE: uname-before=-38" "$trap_log"; then
     echo "aarch64 native trap did not deny uname before the breakpoint" >&2
     exit 1
 fi
-if grep -q "uname-after" "$trap_log"; then
-    echo "aarch64 native trap continued after brk" >&2
+if ! grep -q "GINUX_FIXTURE: uname-after=-38" "$trap_log"; then
+    echo "aarch64 native trap did not deny uname after the breakpoint" >&2
     exit 1
 fi
-if ! grep -q "unexpected native trace stop" "$trap_log"; then
-    echo "aarch64 native trap did not fail closed" >&2
+if grep -q "unexpected native trace stop" "$trap_log"; then
+    echo "aarch64 native trap stopped on brk before the second uname" >&2
+    exit 1
+fi
+if ! grep -q "status=0" "$trap_log"; then
+    echo "aarch64 native trap scenario did not exit 0" >&2
     exit 1
 fi
 rm -f "$trap_log"

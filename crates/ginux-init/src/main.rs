@@ -4771,6 +4771,16 @@ fn supervise_native(pid: usize, domain: &mut Domain, mode: usize, root_descripto
             continue;
         }
         if signal == 5 {
+            #[cfg(target_arch = "aarch64")]
+            {
+                if crate::arch::skip_software_breakpoint(host_pid) {
+                    tasks[task_index] = Some(task);
+                    if ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0 {
+                        native_fail(domain, pid, b"native breakpoint resume failed");
+                    }
+                    continue;
+                }
+            }
             native_fail(domain, pid, b"unexpected native trace stop");
         }
         if signal != (5 | 0x80) {
