@@ -216,9 +216,9 @@ contexts with `clone` (`220`) and `clone3` (`435`). `openat` (`56`) of
 `/dev/vda` returns a block descriptor. `fstat` (`80`) reports that descriptor
 as a block device of 1048576 bytes. The same disk is an ext4 filesystem.
 `openat` of `/ginux.txt` reads that file, and `write` (`64`) replaces bytes
-inside its existing extent. `lseek` (`62`) returns to the start, and the next
-`read` returns the bytes just written. `pread64` (`67`) still addresses the
-raw block device. `brk`, `mmap`, and those block transfers use real
+inside its existing extent. A write past that extent allocates another block.
+`lseek` (`62`) returns to the written bytes, and the next `read` returns them.
+`pread64` (`67`) still addresses the raw block device. `brk`, `mmap`, and those block transfers use real
 memory, and each child runs until `exit` (`93`) before the parent resumes.
 `waitid` (`95`) returns that child's pid and exit status, then forgets the child.
 `uname` (`160`) reports `ginux` and `aarch64`. `clock_gettime` (`113`) returns

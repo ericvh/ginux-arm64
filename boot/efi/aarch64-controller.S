@@ -252,6 +252,55 @@ _start:
     cmp x0, x20
     b.ne fail
 
+    mov x21, #15
+grow_pad:
+    mov x0, x26
+    adr x1, file_pad
+    mov x2, #256
+    mov x8, #64
+    svc #0
+    cmp x0, #256
+    b.ne fail
+    subs x21, x21, #1
+    b.ne grow_pad
+    mov x0, x26
+    adr x1, file_pad
+    mov x2, #239
+    mov x8, #64
+    svc #0
+    cmp x0, #239
+    b.ne fail
+    mov x0, x26
+    adr x1, file_grow_msg
+    adr x2, file_grow_msg_end
+    sub x2, x2, x1
+    mov x20, x2
+    mov x8, #64
+    svc #0
+    cmp x0, x20
+    b.ne fail
+    mov x0, x26
+    mov x1, #4096
+    mov x2, #0
+    mov x8, #62
+    svc #0
+    cmp x0, #4096
+    b.ne fail
+    mov x0, x26
+    mov x1, x19
+    mov x2, x20
+    mov x8, #63
+    svc #0
+    cmp x0, x20
+    b.ne fail
+    mov x0, #1
+    mov x1, x19
+    mov x2, x20
+    mov x8, #64
+    svc #0
+    cmp x0, x20
+    b.ne fail
+
     mov x0, x26
     mov x8, #57
     svc #0
@@ -398,6 +447,11 @@ file_path:
 file_write_msg:
     .ascii "ginux-ext4-wrote\n"
 file_write_msg_end:
+file_grow_msg:
+    .ascii "ginux-ext4-grow\n"
+file_grow_msg_end:
+file_pad:
+    .space 256
 vda_msg:
     .ascii "ginux-sbsa: vda block 1048576\n"
 vda_msg_end:

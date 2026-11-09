@@ -74,6 +74,8 @@ for line in \
     "ginux-sbsa: vda block 1048576" \
     "ginux-ext4-file" \
     "ginux-ext4-wrote" \
+    "ginux: ext4 alloc" \
+    "ginux-ext4-grow" \
     "ginux: svc=dispatch nr=57 close result=" \
     "ginux: svc=dispatch nr=160 uname result=" \
     "ginux-sbsa: uname aarch64" \
