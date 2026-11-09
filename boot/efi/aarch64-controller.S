@@ -213,6 +213,45 @@ _start:
     svc #0
     cmp x0, #16
     b.ne fail
+
+    mov x0, x26
+    mov x1, #0
+    mov x2, #0
+    mov x8, #62
+    svc #0
+    cmp x0, #0
+    b.ne fail
+    mov x0, x26
+    adr x1, file_write_msg
+    adr x2, file_write_msg_end
+    sub x2, x2, x1
+    mov x20, x2
+    mov x8, #64
+    svc #0
+    cmp x0, x20
+    b.ne fail
+    mov x0, x26
+    mov x1, #0
+    mov x2, #0
+    mov x8, #62
+    svc #0
+    cmp x0, #0
+    b.ne fail
+    mov x0, x26
+    mov x1, x19
+    mov x2, x20
+    mov x8, #63
+    svc #0
+    cmp x0, x20
+    b.ne fail
+    mov x0, #1
+    mov x1, x19
+    mov x2, x20
+    mov x8, #64
+    svc #0
+    cmp x0, x20
+    b.ne fail
+
     mov x0, x26
     mov x8, #57
     svc #0
@@ -356,6 +395,9 @@ disk_path:
     .asciz "/dev/vda"
 file_path:
     .asciz "/ginux.txt"
+file_write_msg:
+    .ascii "ginux-ext4-wrote\n"
+file_write_msg_end:
 vda_msg:
     .ascii "ginux-sbsa: vda block 1048576\n"
 vda_msg_end:

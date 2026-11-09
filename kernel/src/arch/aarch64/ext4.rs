@@ -116,6 +116,44 @@ pub(crate) fn lookup(path: &[u8]) -> Result<OpenFile, i64> {
     }
 }
 
+pub(crate) fn write(inode: u32, offset: u64, src: &[u8]) -> Result<usize, i64> {
+    const EINVAL: i64 = -22;
+    const EIO: i64 = -5;
+    const ENOSPC: i64 = -28;
+    if src.is_empty() {
+        return Ok(0);
+    }
+    let inode = read_inode(inode).ok_or(EIO)?;
+    let end = offset.checked_add(src.len() as u64).ok_or(EINVAL)?;
+    let block_size = superblock().ok_or(EIO)?.block_size;
+    if block_size == 0 || !mapped(&inode, offset, end, block_size) {
+        return Err(ENOSPC);
+    }
+    let mut filled = 0;
+    while filled < src.len() {
+        let pos = offset + filled as u64;
+        let logical = pos / block_size;
+        let skip = (pos % block_size) as usize;
+        let block = map_block(&inode, logical).ok_or(EIO)?;
+        let mut data = [0_u8; 4096];
+        let block_size_bytes = block_size as usize;
+        if block_size_bytes > data.len() || !read_block(block, &mut data[..block_size_bytes]) {
+            return Err(EIO);
+        }
+        let room = block_size_bytes - skip;
+        let n = (src.len() - filled).min(room);
+        data[skip..skip + n].copy_from_slice(&src[filled..filled + n]);
+        if !write_block(block, &data[..block_size_bytes]) {
+            return Err(EIO);
+        }
+        filled += n;
+    }
+    if end > inode.size && !set_size(inode.number, end) {
+        return Err(EIO);
+    }
+    Ok(filled)
+}
+
 pub(crate) fn read(inode: u32, offset: u64, dest: &mut [u8]) -> Option<usize> {
     let inode = read_inode(inode)?;
     if offset > inode.size {
@@ -285,6 +323,45 @@ fn map_block(inode: &Inode, logical: u64) -> Option<u64> {
         .map(|extent| extent.start + u64::from(logical - extent.block))
 }
 
+fn mapped(inode: &Inode, offset: u64, end: u64, block_size: u64) -> bool {
+    let mut logical = offset / block_size;
+    let last = (end - 1) / block_size;
+    loop {
+        if map_block(inode, logical).is_none() {
+            return false;
+        }
+        if logical == last {
+            return true;
+        }
+        logical += 1;
+    }
+}
+
+fn set_size(number: u32, size: u64) -> bool {
+    let Some(superblock) = superblock() else {
+        return false;
+    };
+    if number == 0 || superblock.inodes_per_group == 0 {
+        return false;
+    }
+    let index = number - 1;
+    if index / superblock.inodes_per_group != 0 {
+        return false;
+    }
+    let local = u64::from(index % superblock.inodes_per_group);
+    let offset = superblock.inode_table * superblock.block_size + local * superblock.inode_size;
+    let mut raw = [0_u8; 256];
+    let inode_size = superblock.inode_size as usize;
+    if inode_size > raw.len() || !read_at(offset, &mut raw[..inode_size]) {
+        return false;
+    }
+    raw[4..8].copy_from_slice(&(size as u32).to_le_bytes());
+    if inode_size >= 112 {
+        raw[108..112].copy_from_slice(&((size >> 32) as u32).to_le_bytes());
+    }
+    write_at(offset, &raw[..inode_size])
+}
+
 fn read_block(block: u64, dest: &mut [u8]) -> bool {
     let Some(superblock) = superblock() else {
         return false;
@@ -297,6 +374,36 @@ fn read_block_bytes(block: u64, block_size: u64, dest: &mut [u8]) -> bool {
         return false;
     }
     read_at(block * block_size, &mut dest[..block_size as usize])
+}
+
+fn write_block(block: u64, src: &[u8]) -> bool {
+    let Some(superblock) = superblock() else {
+        return false;
+    };
+    let block_size = superblock.block_size as usize;
+    if src.len() < block_size {
+        return false;
+    }
+    write_at(block * superblock.block_size, &src[..block_size])
+}
+
+fn write_at(offset: u64, src: &[u8]) -> bool {
+    let mut filled = 0;
+    while filled < src.len() {
+        let pos = offset + filled as u64;
+        let mut sector = [0_u8; 512];
+        if !virtio::sector_io(pos / 512, false, &mut sector) {
+            return false;
+        }
+        let skip = (pos % 512) as usize;
+        let n = (src.len() - filled).min(512 - skip);
+        sector[skip..skip + n].copy_from_slice(&src[filled..filled + n]);
+        if !virtio::sector_io(pos / 512, true, &mut sector) {
+            return false;
+        }
+        filled += n;
+    }
+    true
 }
 
 fn read_at(offset: u64, dest: &mut [u8]) -> bool {

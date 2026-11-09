@@ -27,7 +27,6 @@ const EBADF: i64 = -9;
 const ENOMEM: i64 = -12;
 const EFAULT: i64 = -14;
 const EINVAL: i64 = -22;
-const EROFS: i64 = -30;
 
 const AT_FDCWD: u64 = (-100_i64) as u64;
 const DISK_FD: u64 = 3;
@@ -345,7 +344,7 @@ pub(crate) fn pwrite(fd: u64, pointer: u64, length: u64, offset: u64) -> i64 {
 
 pub(crate) fn write(fd: u64, pointer: u64, length: u64) -> i64 {
     if fd == FILE_FD {
-        return EROFS;
+        return file_write(pointer, length, file_pos(), true);
     }
     if fd == DISK_FD {
         return block_write(pointer, length, disk_pos(), true);
@@ -442,6 +441,43 @@ fn read_cstr(pointer: u64, dest: &mut [u8]) -> Result<usize, i64> {
         dest[index] = byte[0];
     }
     Err(EINVAL)
+}
+
+fn file_write(pointer: u64, length: u64, offset: u64, update: bool) -> i64 {
+    if !file_open() {
+        return EBADF;
+    }
+    if length == 0 {
+        return 0;
+    }
+    let size = (length as usize).min(MAX_WRITE);
+    let mut buffer = [0_u8; MAX_WRITE];
+    {
+        let Some(state) = state() else {
+            return EFAULT;
+        };
+        if !covers(state, pointer, size as u64) {
+            return EFAULT;
+        }
+    }
+    unsafe {
+        core::ptr::copy_nonoverlapping(pointer as *const u8, buffer.as_mut_ptr(), size);
+    }
+    let copied = match ext4::write(file_inode(), offset, &buffer[..size]) {
+        Ok(copied) => copied,
+        Err(errno) => return errno,
+    };
+    let Some(state) = state() else {
+        return EFAULT;
+    };
+    let end = offset + copied as u64;
+    if end > state.file_size {
+        state.file_size = end;
+    }
+    if update {
+        state.file_pos = end;
+    }
+    copied as i64
 }
 
 fn file_read(pointer: u64, length: u64, offset: u64, update: bool) -> i64 {

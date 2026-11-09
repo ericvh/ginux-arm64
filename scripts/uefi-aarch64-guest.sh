@@ -73,6 +73,7 @@ for line in \
     "ginux: svc=dispatch nr=80 fstat result=" \
     "ginux-sbsa: vda block 1048576" \
     "ginux-ext4-file" \
+    "ginux-ext4-wrote" \
     "ginux: svc=dispatch nr=57 close result=" \
     "ginux: svc=dispatch nr=160 uname result=" \
     "ginux-sbsa: uname aarch64" \
@@ -108,7 +109,7 @@ if grep -F -q "GINUX_KERNEL_PANIC" "$log"; then
     echo "uefi aarch64 kernel panicked" >&2
     fail=1
 fi
-for syscall in "nr=214 brk" "nr=222 mmap" "nr=64 write" "nr=63 read" "nr=220 clone" "nr=435 clone3" "nr=56 openat" "nr=80 fstat" "nr=57 close" "nr=160 uname" "nr=113 clock_gettime" "nr=95 waitid"; do
+for syscall in "nr=214 brk" "nr=222 mmap" "nr=64 write" "nr=63 read" "nr=220 clone" "nr=435 clone3" "nr=56 openat" "nr=80 fstat" "nr=62 lseek" "nr=57 close" "nr=160 uname" "nr=113 clock_gettime" "nr=95 waitid"; do
     if grep -F "$syscall" "$log" | grep -F -q "result=-"; then
         echo "uefi aarch64 kernel returned an error for $syscall" >&2
         fail=1
