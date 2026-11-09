@@ -1,16 +1,22 @@
 #![no_main]
 #![no_std]
 
+#[cfg(target_arch = "aarch64")]
+mod aarch64_measured;
+#[cfg_attr(target_arch = "aarch64", allow(dead_code))]
 mod generated_boot;
 
+#[cfg(target_arch = "aarch64")]
+use aarch64_measured::{BOOT_MANIFEST, BOOT_MANIFEST_SHA256, BOOT_MANIFEST_SIGNATURE};
 #[cfg(target_arch = "x86_64")]
 use core::arch::asm;
 use core::ffi::c_void;
 use core::panic::PanicInfo;
+#[cfg(not(target_arch = "aarch64"))]
 use generated_boot::{
     BOOT_MANIFEST, BOOT_MANIFEST_SHA256, BOOT_MANIFEST_SIGNATURE, CONTROLLER_RUNTIME,
-    CONTROL_PLANE_BUNDLE, ROOT_IMAGE,
 };
+use generated_boot::{CONTROL_PLANE_BUNDLE, ROOT_IMAGE};
 use ginux_kernel::{
     kernel_entry, rebase_loaded_image, BootInfo, ResetSystem, BOOT_INFO_MAGIC, BOOT_INFO_VERSION,
 };
@@ -407,6 +413,17 @@ unsafe fn find_acpi_rsdp(system_table: *const EfiSystemTable) -> *const u8 {
     acpi_v1
 }
 
+fn controller_runtime() -> &'static [u8] {
+    #[cfg(target_arch = "aarch64")]
+    {
+        include_bytes!("../aarch64-controller.elf")
+    }
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        &CONTROLLER_RUNTIME
+    }
+}
+
 unsafe fn exit_boot_services(
     image: EfiHandle,
     system_table: *mut EfiSystemTable,
@@ -461,8 +478,8 @@ unsafe fn exit_boot_services(
                 manifest_signature: BOOT_MANIFEST_SIGNATURE,
                 control_plane_bundle: CONTROL_PLANE_BUNDLE.as_ptr(),
                 control_plane_bundle_size: CONTROL_PLANE_BUNDLE.len(),
-                controller_runtime: CONTROLLER_RUNTIME.as_ptr(),
-                controller_runtime_size: CONTROLLER_RUNTIME.len(),
+                controller_runtime: controller_runtime().as_ptr(),
+                controller_runtime_size: controller_runtime().len(),
                 root_image: ROOT_IMAGE.as_ptr(),
                 root_image_size: ROOT_IMAGE.len(),
                 framebuffer_base: framebuffer.base,

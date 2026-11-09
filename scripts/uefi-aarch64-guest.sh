@@ -20,7 +20,10 @@ cp "$vars_src" "$work/vars.fd"
 
 log="$work/boot.log"
 set +e
+mkdir -p "$work/src"
+printf 'ginux-ext4-file\n' >"$work/src/ginux.txt"
 dd if=/dev/zero of="$work/disk.img" bs=1M count=1 status=none
+mkfs.ext4 -F -L ginux -b 4096 -O ^inline_data -d "$work/src" "$work/disk.img" >/dev/null
 timeout 90 qemu-system-aarch64 \
     -machine virt,gic-version=3,iommu=smmuv3,acpi=on \
     -cpu cortex-a57 \
@@ -54,17 +57,45 @@ for line in \
     "ginux: psci version" \
     "ginux: timer-irq=" \
     "ginux: virtio pci device" \
+    "ginux: virtio-blk read ok" \
+    "ginux: ext4 file ok" \
     "ginux: smmuv3" \
-    "ginux: svc=dispatch nr=64" \
-    "ginux-sbsa: process-write ok" \
-    "ginux: svc=dispatch nr=172 result=4242" \
-    "ginux: svc=dispatch nr=63 read result=-9" \
-    "ginux: svc=dispatch nr=160 uname result=-14" \
+    "ginux: embedded controller runtime measurement accepted" \
+    "ginux: controller elf aarch64" \
+    "ginux: controller elf loaded" \
+    "ginux: process=started" \
+    "ginux-sbsa: controller write ok" \
+    "ginux: svc=dispatch nr=64 write result=" \
     "ginux: svc=dispatch nr=214 brk result=" \
-    "ginux: svc=dispatch nr=220 clone result=-11" \
-    "ginux: svc=dispatch nr=222 mmap result=-22" \
-    "ginux: aarch64 svc table unique=285" \
+    "ginux: svc=dispatch nr=222 mmap result=" \
+    "ginux-sbsa: controller memory ok" \
+    "ginux: svc=dispatch nr=56 openat result=" \
+    "ginux: svc=dispatch nr=80 fstat result=" \
+    "ginux-sbsa: vda block 1048576" \
+    "ginux-ext4-file" \
+    "ginux-ext4-wrote" \
+    "ginux: ext4 alloc" \
+    "ginux-ext4-grow" \
+    "ginux: svc=dispatch nr=57 close result=" \
+    "ginux: svc=dispatch nr=160 uname result=" \
+    "ginux-sbsa: uname aarch64" \
+    "ginux: svc=dispatch nr=113 clock_gettime result=" \
+    "ginux-sbsa: clock realtime" \
+    "ginux-sbsa: clock monotonic" \
+    "ginux: svc=dispatch nr=63 read result=" \
+    "ginux-sbsa: clone child ok" \
+    "ginux: svc=dispatch nr=220 clone result=" \
+    "ginux-sbsa: clone parent ok" \
+    "ginux: waitid pid 4243 status 42" \
+    "ginux-sbsa: waitid clone 42" \
+    "ginux-sbsa: clone3 child ok" \
+    "ginux: svc=dispatch nr=435 clone3 result=" \
+    "ginux-sbsa: clone3 parent ok" \
+    "ginux: waitid pid 4244 status 7" \
+    "ginux-sbsa: waitid clone3 7" \
+    "ginux: svc=dispatch nr=95 waitid result=" \
     "ginux: svc=dispatch nr=93" \
+    "ginux: process=exited" \
     "ginux: sbsa arm services ready"
 do
     if ! grep -F -q "$line" "$log"; then
@@ -80,6 +111,12 @@ if grep -F -q "GINUX_KERNEL_PANIC" "$log"; then
     echo "uefi aarch64 kernel panicked" >&2
     fail=1
 fi
+for syscall in "nr=214 brk" "nr=222 mmap" "nr=64 write" "nr=63 read" "nr=220 clone" "nr=435 clone3" "nr=56 openat" "nr=80 fstat" "nr=62 lseek" "nr=57 close" "nr=160 uname" "nr=113 clock_gettime" "nr=95 waitid"; do
+    if grep -F "$syscall" "$log" | grep -F -q "result=-"; then
+        echo "uefi aarch64 kernel returned an error for $syscall" >&2
+        fail=1
+    fi
+done
 if [ "$fail" -ne 0 ]; then
     exit 1
 fi

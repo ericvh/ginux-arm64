@@ -24,7 +24,9 @@ The image does not link the x86_64 APIC, paging, or Linux syscall path.
 ## Completed work
 
 - [x] 285 AArch64 syscall numbers are dispatched from `svc #0`.
-- [x] `make uefi-aarch64-guest` reports `ginux: aarch64 svc table unique=285`.
+- [x] The aarch64 image measures an AArch64 controller ELF and starts it.
+  `write`, `brk`, and `mmap` return real user memory. The generated EL0
+  probe is no longer the boot process.
 - [x] The x86_64 `ginux-boot.efi` target is unchanged.
 
 ## Remaining work
@@ -34,20 +36,25 @@ The image does not link the x86_64 APIC, paging, or Linux syscall path.
 ## Verification plan
 
 `make uefi-aarch64-guest` exits 0. The log contains the gate 18 SBSA lines,
-`ginux: svc=dispatch nr=63 read result=-9`,
-`ginux: svc=dispatch nr=160 uname result=-14`,
-`ginux: svc=dispatch nr=214 brk result=`,
-`ginux: svc=dispatch nr=220 clone result=-11`,
-`ginux: svc=dispatch nr=222 mmap result=-22`,
-`ginux: aarch64 svc table unique=285`, and
-`ginux: sbsa arm services ready`, with no `GINUX_KERNEL_PANIC`.
+`ginux: embedded controller runtime measurement accepted`,
+`ginux: controller elf aarch64`,
+`ginux: controller elf loaded`,
+`ginux-sbsa: controller write ok`,
+`ginux: svc=dispatch nr=64 write result=`,
+`ginux: svc=dispatch nr=214 brk result=` with a positive address,
+`ginux: svc=dispatch nr=222 mmap result=` with a positive address,
+`ginux-sbsa: controller memory ok`, and
+`ginux: sbsa arm services ready`, with no `GINUX_KERNEL_PANIC`. The `brk` and
+`mmap` results must not be negative.
 
 ## Evidence
 
 Observed on 2026-11-06 under AAVMF on
 `qemu-system-aarch64 -machine virt,gic-version=3,iommu=smmuv3,acpi=on`.
-The probe issued 287 `svc` entries and the kernel counted 285 distinct
-AArch64 numbers. QEMU exited 0.
+The first boot counted 285 distinct AArch64 numbers from a generated probe.
+The controller boot on 2026-11-07 measured an AArch64 ELF, returned `brk`
+`0x20001000` then `0x20002000`, returned `mmap` `0x20100000`, and printed
+`ginux-sbsa: controller memory ok` after storing into both pages. QEMU exited 0.
 
 ## Not ported
 

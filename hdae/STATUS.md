@@ -9,8 +9,18 @@
   interrupt, starts one EL0 process, and dispatches `svc #0`. The historical
   UEFI kernel now also builds for aarch64 and boots under AAVMF with ACPI,
   AArch64 page tables, GICv3, the generic timer, PSCI, PCIe ECAM, SMMUv3, and
-  an EL0 `svc` path. That path now dispatches the 285 AArch64 numbers for
-  the Linux calls the x86_64 kernel implements. Gates 9.75, 10, 11,
+  an EL0 `svc` path. That path dispatches the 285 AArch64 numbers for the
+  Linux calls the x86_64 kernel implements. The aarch64 image now measures
+  an AArch64 controller ELF and starts that ELF instead of the generated
+  probe. `write`, `brk`, and `mmap` use real user pages. The virtio-blk PCI
+  device services `read`, and `clone` / `clone3` run a second EL0 context.
+  `openat` of `/dev/vda` returns a block descriptor that can `pread64` a
+  later sector and write a sector back. `waitid` returns a child exit status
+  and then forgets that child. `fstat` reports `/dev/vda` as a block device,
+  `uname` reports `aarch64`, and `clock_gettime` returns the UEFI realtime
+  clock and the generic timer. The virtio disk carries an ext4 filesystem.
+  `openat` of `/ginux.txt` reads that file, and `write` updates it. A write
+  past the existing extent allocates another block. Gates 9.75, 10, 11,
   and 13 remain the upstream product sequence and have not been started by
   this port.
 - Gate 1 is accepted and closed under the corrected ordinary-host-process
@@ -90,13 +100,18 @@ scope, threat model, and invariants.
   stacked on gate 18. Gate 9.75 remains the next upstream product checkpoint
   and is not the active fork task.
 - Last evidence: `make uefi-aarch64-guest` passed under AAVMF on virt with
-  GICv3 and SMMUv3. The log shows the SBSA services and
-  `ginux: aarch64 svc table unique=285`, including read, uname, brk, clone,
-  and mmap. The x86_64 `ginux-boot.efi` target is unchanged.
+  GICv3 and SMMUv3. The virtio disk is a 1048576-byte ext4 filesystem.
+  `openat` of `/ginux.txt` read `ginux-ext4-file`. `write` stored
+  `ginux-ext4-wrote` in that file, and the following `read` returned those
+  17 bytes. A later write past the first extent allocated block 9, and the
+  read at offset 4096 returned `ginux-ext4-grow`. `fstat` still reported the
+  block device, `uname` reported `aarch64`, and `clock_gettime` returned both
+  the UEFI realtime clock and a monotonic generic-timer value.
 - Open decision: Gate 9.75 must resolve the pre-boot hook execution context and
-  authority model before implementing hooks.
-- Exact next action: wait for human review of the arm64 pull requests,
-  including the AArch64 svc table. Upstream gate 9.75 stays queued.
+  authority model before implementing hooks. This writer does not refresh
+  ext4 metadata checksums, and it keeps extent trees at depth zero.
+- Exact next action: wait for human review of ext4 block allocation. Upstream
+  gate 9.75 stays queued.
 
 ## Evidence
 
@@ -393,8 +408,8 @@ scope, threat model, and invariants.
 
 ## Exact next action
 
-Wait for human review of the arm64 pull requests, including the AArch64 svc
-table. Upstream gate 9.75 stays queued and is not this fork's next edit.
+Wait for human review of ext4 block allocation on the bare-metal branch.
+Upstream gate 9.75 stays queued and is not this fork's next edit.
 
 ## Context recovery
 
@@ -403,9 +418,13 @@ table. Upstream gate 9.75 stays queued and is not this fork's next edit.
 - Reload after context shift: required
 - Active gate: 19, the AArch64 Linux svc table on the UEFI SBSA boot. Gate
   9.75 remains the next upstream product checkpoint and has not started.
-- Last evidence: `make uefi-aarch64-guest` passed under AAVMF and reported
-  `ginux: aarch64 svc table unique=285`. Gates 9 and 9.5 were accepted by
-  the human on 2026-11-06.
+- Last evidence: `make uefi-aarch64-guest` passed under AAVMF. The virtio
+  disk is ext4. `openat` of `/ginux.txt` read `ginux-ext4-file`, `write`
+  stored `ginux-ext4-wrote`, and a write past the first extent allocated
+  block 9. The read at offset 4096 returned `ginux-ext4-grow`. `fstat` still
+  reported a 1048576-byte block device, `uname` reported `aarch64`, and
+  `clock_gettime` returned realtime and monotonic times. Gates 9 and 9.5
+  were accepted by the human on 2026-11-06.
 - Approved network direction: Gate 9 defaults to full host-shared inbound and
   outbound networking with normal host routing and bind conflicts, under Ginux
   mediation and audit. Gate 9.75 adds comprehensive domain configuration,

@@ -208,11 +208,22 @@ The aarch64 image is the same bootloader and kernel crate. It shares the PE
 image check and the measured-boot manifest, then brings up Arm services from
 the UEFI handoff: ACPI (MADT, GTDT, MCFG, SPCR, IORT), AArch64 translation
 tables, a physical frame allocator, GICv3, the generic timer, PSCI, an SBSA or
-PL011 UART, PCIe ECAM, and SMMUv3. One EL0 process enters through `svc #0`.
-It writes its buffer (`64`), returns `4242` from getpid (`172`), then issues
-the AArch64 numbers for the Linux calls the x86_64 kernel implements, and
-exits (`93`). That image does not link the x86_64 APIC, paging, or Linux
-syscall path.
+PL011 UART, PCIe ECAM, and SMMUv3. The measured controller is an AArch64 ELF.
+The kernel loads that ELF into user memory, then the controller writes to the
+UART (`64`), grows `brk` (`214`), and maps an anonymous page with `mmap`
+(`222`). It reads the virtio-blk PCI disk (`63`) and starts two more EL0
+contexts with `clone` (`220`) and `clone3` (`435`). `openat` (`56`) of
+`/dev/vda` returns a block descriptor. `fstat` (`80`) reports that descriptor
+as a block device of 1048576 bytes. The same disk is an ext4 filesystem.
+`openat` of `/ginux.txt` reads that file, and `write` (`64`) replaces bytes
+inside its existing extent. A write past that extent allocates another block.
+`lseek` (`62`) returns to the written bytes, and the next `read` returns them.
+`pread64` (`67`) still addresses the raw block device. `brk`, `mmap`, and those block transfers use real
+memory, and each child runs until `exit` (`93`) before the parent resumes.
+`waitid` (`95`) returns that child's pid and exit status, then forgets the child.
+`uname` (`160`) reports `ginux` and `aarch64`. `clock_gettime` (`113`) returns
+the UEFI realtime clock and a monotonic time from the generic timer. The AArch64 Linux syscall table remains available. That
+image does not link the x86_64 APIC, paging, or Linux syscall path.
 
 ```sh
 make uefi-aarch64-guest
