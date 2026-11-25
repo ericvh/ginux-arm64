@@ -743,7 +743,7 @@ mod tests {
         });
         let manifest = cache_bytes(&cache, &serde_json::to_vec(&manifest).unwrap());
         let index = serde_json::json!({"manifests": [{
-            "digest": manifest, "platform": {"os": "linux", "architecture": "amd64"}
+            "digest": manifest, "platform": {"os": "linux", "architecture": OCI_ARCHITECTURE}
         }]});
         let index = cache_bytes(&cache, &serde_json::to_vec(&index).unwrap());
         let destination = cache.join("root");

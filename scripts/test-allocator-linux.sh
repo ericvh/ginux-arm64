@@ -4,8 +4,8 @@ set -eu
 cd "$(dirname "$0")/.."
 
 case $(uname -s):$(uname -m) in
-    Linux:x86_64) ;;
-    *) printf '%s\n' 'allocator Linux integration requires Linux x86-64' >&2; exit 77 ;;
+    Linux:x86_64|Linux:aarch64) ;;
+    *) printf '%s\n' 'allocator Linux integration requires Linux x86-64 or aarch64' >&2; exit 77 ;;
 esac
 
 RUSTFLAGS='-C link-arg=-Wl,-z,relro -C link-arg=-Wl,-z,now' \

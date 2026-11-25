@@ -117,3 +117,9 @@ jobs:
       - run: make test-process-native-arm64
       - run: sudo make test-gate1-setup-arm64
       - run: sudo make test-tracee-kill-arm64
+      # The host-side crates on an arm64 host: every unit test, then the
+      # allocator's conformance and benchmark programs with the library
+      # preloaded.
+      - run: make test-unit
+      - run: make test-allocator
+      - run: make test-allocator-linux
