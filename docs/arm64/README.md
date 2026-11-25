@@ -163,7 +163,8 @@ image, on upstream `f4b85186` (pull request #333):
   `make native-aarch64-guest` pass.
 - `make native-suite-aarch64-guest` passes: all 42 checks of
   `test-native-supervision.py`, in an Alpine 3 arm64 userland with Python
-  3.13.
+  3.13. The same 42 pass directly on GitHub's `ubuntu-24.04-arm` runner in
+  the `aarch64` CI job.
 - The upstream x86_64 integration suite is unchanged in result:
   `test-launch`, `test-native-supervision` (all eight scripts),
   `test-process-native`, `test-gate1-setup`, and `test-tracee-kill` pass.

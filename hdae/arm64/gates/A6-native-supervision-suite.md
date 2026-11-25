@@ -32,7 +32,10 @@ evidence that `ginux native` mediates an aarch64 workload.
 
 ## Delivery
 
-Branch `arm64/main` on the fork, pushed. No pull request.
+Branch `arm64/main` on the fork, pushed. No pull request. Commits
+`7a0f0f52` (breakpoint), `4f6e25cb` (restart), `d56c6a33` (`close_range`
+flags), `8140605c` (fixture and suite), `85e2e5c9` (this record), and
+`c4cc5a95` (CI toolchain).
 
 ## Completed work
 
@@ -77,6 +80,7 @@ Alpine arm64 userland with Python 3.13.
 | The x86_64 fixture is the same program | compile upstream's file and this one with the Makefile's flags, `cmp` | identical |
 | x86_64 results are unchanged | `sudo make test-launch test-native-supervision test-gate1-setup test-tracee-kill` | 69, 57, 3, 5 `PASS` lines; the same counts as before |
 | Checks | `make check`, `make check-arm64`, `make test-unit` | pass; 174 unit tests |
+| The script passes on an arm64 host | CI run 45544519662, job `aarch64`, step `sudo make test-native-supervision-arm64` on `ubuntu-24.04-arm` | 42 `PASS native` lines, `test-native-supervision: PASS`; the other three jobs of the run pass too |
 
 Order of failures on the way, each fixed before the next appeared:
 
@@ -89,9 +93,12 @@ Order of failures on the way, each fixed before the next appeared:
 
 - The guest kernel is 7.4-rc1, where a tracer's write to `x0` at an entry
   stop also sets the restart value. The older behaviour, where the restart
-  uses the caller's own `x0`, is handled by the same code and is what the
-  CI runner's kernel exercises; that job has not run yet at the time of
-  writing.
+  uses the caller's own `x0`, is handled by the same code. The suite also
+  passes on the CI runner's own kernel; which of the two behaviours that
+  kernel has was not determined.
+- The first CI run of the arm64 job failed at `make check-arm64`: the
+  runner's Rust 1.100 clippy rejects a range loop in upstream's
+  `ginux-runtime`. The job is pinned to 1.99.1, the toolchain used locally.
 - `kill` and `pidfd_open` selector preservation cannot be observed on
   aarch64, and `int80` is replaced by a trap. `docs/arm64/README.md` has the
   detail.
