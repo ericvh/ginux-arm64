@@ -378,6 +378,11 @@ struct SavedCall {
     restart_nr: u64,
     restart_args: [u64; 6],
     restart_x0: u64,
+    /// How the call the tracee issued is shown to the supervisor (see
+    /// [`show_call`]), and the argument registers it issued it with, which
+    /// are put back where the shown form has no place for them.
+    shown: u8,
+    own: [u64; 6],
 }
 
 const EMPTY_CALL: SavedCall = SavedCall {
@@ -395,6 +400,8 @@ const EMPTY_CALL: SavedCall = SavedCall {
     restart_nr: 0,
     restart_args: [0; 6],
     restart_x0: 0,
+    shown: SHOWN_AS_ISSUED,
+    own: [0; 6],
 };
 
 /// One record per tracee inside a syscall. The native supervisor tracks at
@@ -580,6 +587,52 @@ fn write_syscallno(pid: usize, number: i32) -> bool {
     ) >= 0
 }
 
+/// Shown under its own number, arguments in place.
+const SHOWN_AS_ISSUED: u8 = 0;
+/// Shown as the newer form that adds a flags argument, with no flags.
+const SHOWN_WITH_FLAGS: u8 = 1;
+/// Shown as the older form that has no directory descriptor.
+const SHOWN_WITHOUT_DIRECTORY: u8 = 2;
+
+/// Name a call for the supervisor the way an x86-64 C library would have
+/// issued it, and return how it was changed.
+///
+/// `access` and `chmod` have no numbers on aarch64. A C library issues
+/// `faccessat` and `fchmodat` for them, two calls that take no flags and
+/// that the contract does not catalog. On x86-64 the same library functions
+/// issue `access`, `chmod`, or the newer `faccessat2` and `fchmodat2`, and
+/// those are what the contract and the supervisor know. So:
+///
+/// - `faccessat(dir, path, mode)` is shown as `faccessat2` with no flags.
+/// - `fchmodat(AT_FDCWD, path, mode)` is shown as `chmod(path, mode)`.
+/// - `fchmodat(dir, path, mode)` is shown as `fchmodat2` with no flags.
+///
+/// The kernel still runs the call the tracee issued unless the supervisor
+/// changes it: [`write_user_regs`] maps an unchanged call back.
+fn show_call(native: i64, args: &mut [u64; 6]) -> (u64, u8) {
+    const HOST_FACCESSAT: i64 = 48;
+    const HOST_FCHMODAT: i64 = 53;
+    const X86_CHMOD: u64 = 90;
+    const X86_FACCESSAT2: u64 = 439;
+    const X86_FCHMODAT2: u64 = 452;
+    const AT_FDCWD: i32 = -100;
+    match native {
+        HOST_FACCESSAT => {
+            args[3] = 0;
+            (X86_FACCESSAT2, SHOWN_WITH_FLAGS)
+        }
+        HOST_FCHMODAT if args[0] as i32 == AT_FDCWD => {
+            *args = [args[1], args[2], 0, 0, 0, 0];
+            (X86_CHMOD, SHOWN_WITHOUT_DIRECTORY)
+        }
+        HOST_FCHMODAT => {
+            args[3] = 0;
+            (X86_FCHMODAT2, SHOWN_WITH_FLAGS)
+        }
+        _ => (logical_number(native), SHOWN_AS_ISSUED),
+    }
+}
+
 /// Host syscall number to the x86-64 number of the same name.
 fn logical_number(native: i64) -> u64 {
     if native < 0 {
@@ -703,11 +756,16 @@ pub fn read_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
             (raw.regs[0], EXIT_PHASE)
         }
         SYSCALL_INFO_ENTRY | SYSCALL_INFO_SECCOMP => {
+            let own = args;
+            let shown;
+            (nr, shown) = show_call(native, &mut args);
             exchange_arguments(nr, &mut args);
             restore_restarted_argument(pid, &mut raw, nr, &mut args);
             let slot = claim_call(pid);
             unsafe {
                 let mut record = core::ptr::read(slot);
+                record.shown = shown;
+                record.own = own;
                 record.pc = raw.pc;
                 record.nr = nr;
                 record.args = args;
@@ -813,6 +871,33 @@ pub fn write_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
     raw.regs[3] = args[3];
     raw.regs[4] = args[4];
     raw.regs[5] = args[5];
+    // A call shown in another form (see `show_call`) and left as that form
+    // goes back to the registers the tracee issued it with: the kernel runs
+    // the tracee's own call, and what the shown form has no place for is the
+    // tracee's again.
+    let mut own_call = false;
+    if let Some(record) = record {
+        if phase != REPLAY_PHASE && (skip || logical.orig_rax == record.issued) {
+            match record.shown {
+                SHOWN_WITH_FLAGS if logical.r10 == 0 => {
+                    raw.regs[3] = record.own[3];
+                    own_call = true;
+                }
+                SHOWN_WITHOUT_DIRECTORY => {
+                    if phase == ENTRY_PHASE && !skip {
+                        raw.regs[0] = record.own[0];
+                    }
+                    raw.regs[1] = logical.rdi;
+                    raw.regs[2] = logical.rsi;
+                    raw.regs[3] = record.own[3];
+                    raw.regs[4] = record.own[4];
+                    raw.regs[5] = record.own[5];
+                    own_call = true;
+                }
+                _ => {}
+            }
+        }
+    }
     let number = native_number(logical.orig_rax);
     if let Some(record) = record.as_mut() {
         match phase {
@@ -833,7 +918,7 @@ pub fn write_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
         }
         match phase {
             ENTRY_PHASE | REPLAY_PHASE if !skip => record.sent_x0 = raw.regs[0],
-            EXIT_PHASE if restart_result(logical.rax) => {
+            EXIT_PHASE if restart_result(logical.rax) && record.shown == SHOWN_AS_ISSUED => {
                 record.restart = true;
                 record.restart_pc = logical.rip;
                 record.restart_nr = logical.orig_rax;
@@ -857,6 +942,9 @@ pub fn write_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
     // arrives first must not apply restart handling to its first argument.
     let wanted = if phase == REPLAY_PHASE {
         Some(-1)
+    } else if own_call {
+        // The tracee's own number stands, unless the call is skipped.
+        skip.then_some(-1)
     } else {
         number.filter(|_| logical_number(current) != logical.orig_rax)
     };
@@ -902,3 +990,8 @@ pub fn replay_syscall(regs: &mut UserRegs, resume: u64, syscall: u64) {
 pub fn emulated_result(regs: &mut UserRegs) {
     regs.orig_rax = NO_SYSCALL;
 }
+
+/// The calls the aarch64 vDSO answers without a syscall: gettimeofday,
+/// clock_gettime and clock_getres, by x86-64 number. `getcpu` is a real
+/// syscall here, and `time` does not exist.
+pub const VDSO_SYSCALLS: [u64; 3] = [96, 228, 229];

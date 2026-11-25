@@ -277,3 +277,7 @@ pub unsafe fn syscall6(
 /// Prepare a register file for a call that `PTRACE_SYSEMU` stopped and the
 /// kernel will not run. `rax` already is the result on x86-64.
 pub fn emulated_result(_regs: &mut UserRegs) {}
+
+/// The calls the x86-64 vDSO answers without a syscall: gettimeofday, time,
+/// clock_gettime, clock_getres and getcpu, by x86-64 number.
+pub const VDSO_SYSCALLS: [u64; 5] = [96, 201, 228, 229, 309];

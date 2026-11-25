@@ -1394,10 +1394,10 @@ const _: () = {
     }
 };
 
-/// The x86-64 vDSO entries: time, gettimeofday, clock_gettime, clock_getres
-/// and getcpu. Launch execs the workload with the host vDSO mapped, so libc
-/// answers these calls without a syscall.
-const VDSO_SYSCALLS: [u64; 5] = [96, 201, 228, 229, 309];
+// Launch execs the workload with the host vDSO mapped, so libc answers the
+// calls the vDSO implements without a syscall. Which those are is the
+// architecture's.
+use crate::arch::VDSO_SYSCALLS;
 
 /// Whether launch would accept this rule's explicit denial without
 /// enforcing it.

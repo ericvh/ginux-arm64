@@ -3016,8 +3016,9 @@ fn vfs_main(config_path: *const u8, rootfs_path: *const u8, index_path: *const u
             b"bash lookup failed",
         ),
     };
-    let mut magic = [0u8; 4];
-    if vfs.read(bash_fd, &mut magic) != Ok(4) || &magic != b"\x7fELF" {
+    // The ELF header through e_machine: 62 is x86-64, 183 is aarch64.
+    let mut magic = [0u8; 20];
+    if vfs.read(bash_fd, &mut magic) != Ok(20) || &magic[..4] != b"\x7fELF" {
         vfs_fail(
             &mut instance,
             &mut vfs,
@@ -3049,7 +3050,10 @@ fn vfs_main(config_path: *const u8, rootfs_path: *const u8, index_path: *const u
     write_all(b"GINUX_VFS: root=");
     line(config.root.as_bytes());
     line(b"GINUX_VFS: base=/etc/os-release identity=Rocky-Linux");
-    line(b"GINUX_VFS: base=/usr/bin/bash format=ELF64-x86_64");
+    line(match u16::from_le_bytes([magic[18], magic[19]]) {
+        183 => b"GINUX_VFS: base=/usr/bin/bash format=ELF64-aarch64",
+        _ => b"GINUX_VFS: base=/usr/bin/bash format=ELF64-x86_64",
+    });
     write_all(b"GINUX_VFS: overlay=/ginux-overlay-proof value=");
     line(OVERLAY_VALUE);
     line(b"GINUX_VFS: managed-host-paths=unexposed managed-host-fds=unexposed");
@@ -8826,7 +8830,10 @@ fn supervise_native(
             }
             Action::Mediate
                 if mode == 3
-                    && syscall == SYS_GETDENTS64_HOST as u64
+                    // getdents64 by its x86-64 number, as every number in
+                    // this loop is; the daemon's own host number differs
+                    // on aarch64.
+                    && syscall == 217
                     && native_virtual_kernel_fd(
                         &virtual_kernel_fds,
                         host_pid,
@@ -9530,10 +9537,12 @@ fn supervise_native(
                     && processes
                         .view(task.virtual_id)
                         .is_ok_and(|view| view.credentials.uid == 0);
+                // The kernel reads these three as 32-bit values. An aarch64
+                // C library passes the first magic number sign-extended.
                 let allowed = root_init
-                    && registers.rdi == LINUX_REBOOT_MAGIC1
-                    && registers.rsi == LINUX_REBOOT_MAGIC2
-                    && registers.rdx == LINUX_REBOOT_CMD_POWER_OFF;
+                    && registers.rdi as u32 == LINUX_REBOOT_MAGIC1 as u32
+                    && registers.rsi as u32 == LINUX_REBOOT_MAGIC2 as u32
+                    && registers.rdx as u32 == LINUX_REBOOT_CMD_POWER_OFF as u32;
                 if allowed {
                     write_all(b"translate surface=virtual-poweroff result=instance-shutdown\n");
                     line_to(
