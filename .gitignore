@@ -7,3 +7,4 @@
 /.artifacts/
 /baremetal/target/
 /baremetal/legacy-kernel/target/
+__pycache__/
