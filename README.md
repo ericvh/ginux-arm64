@@ -591,3 +591,11 @@ Exited zombies and stopped/continued children are not treated as reaped.
 Private pins close when waitid or wait4 reclaims the child; they do not change
 the instance-visible descriptor budget. The native host must support pidfd
 final-reap readiness, as in the Linux 6.12 ABI used for this contract.
+
+## aarch64 port (this fork)
+
+This fork also builds the userspace daemon for aarch64 and carries an aarch64
+port of the historical UEFI kernel. Upstream's approved target is x86-64; the
+port is fork-only work. See [docs/arm64/README.md](docs/arm64/README.md) for
+the daemon, [baremetal/README.md](baremetal/README.md) for the kernel, and
+[hdae/arm64/README.md](hdae/arm64/README.md) for its standing and history.
