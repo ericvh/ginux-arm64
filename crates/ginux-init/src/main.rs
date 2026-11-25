@@ -11547,7 +11547,9 @@ fn native_arguments_allowed(syscall: u64, registers: &UserRegs, mode: usize) -> 
             // `who` is an `int`, which the kernel reads from the low half of
             // the register. A C library may or may not sign-extend its -1.
             98 => matches!(registers.rdi as i32, -1..=1) && registers.rsi != 0,
-            79 => registers.rdi != 0 && registers.rsi <= 4096,
+            // A C library's `getcwd(NULL, 0)` asks with a buffer of `PATH_MAX`
+            // or one page, whichever is larger.
+            79 => registers.rdi != 0 && registers.rsi <= arch::page_size().max(4096),
             81 | 306 => registers.rdi < INSTANCE_NULL_FD as u64,
             280 => {
                 (registers.rdi as u32 == (-100i32) as u32
