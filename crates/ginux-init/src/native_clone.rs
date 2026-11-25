@@ -1,12 +1,21 @@
 //! Native clone3 argument ownership. The host reads only a private read-only
 //! anonymous snapshot, never a validated-then-reused caller structure.
+use crate::arch::MAX_PAGE_SIZE;
 use crate::supervisor::{
     poke_tracee_bytes, replay_syscall, syscall6, UserRegs, EFAULT, EINVAL, SYS_PROCESS_VM_READV,
 };
 
 const BASE: u64 = 0x6000_0000_0000;
 const PAGE: u64 = 4096;
-const END: u64 = BASE + 128 * PAGE;
+/// One snapshot for each task slot, mapped at a fixed address. The slots are
+/// spaced so that every address is page-aligned whatever page size the host
+/// kernel has; a fixed mapping anywhere else fails with `EINVAL`.
+const STRIDE: u64 = if PAGE > MAX_PAGE_SIZE {
+    PAGE
+} else {
+    MAX_PAGE_SIZE
+};
+const END: u64 = BASE + 128 * STRIDE;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
@@ -84,7 +93,7 @@ impl Pending {
             args,
             original: arguments(regs),
             rip: regs.rip,
-            address: BASE + slot as u64 * PAGE,
+            address: BASE + slot as u64 * STRIDE,
             result: 0,
             sigchld: false,
         })

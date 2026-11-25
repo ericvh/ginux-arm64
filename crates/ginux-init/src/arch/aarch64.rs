@@ -1287,6 +1287,11 @@ pub fn abort_trap(pid: usize) -> bool {
     instruction & BRK_MASK == BRK && (instruction >> 5) & 0xffff != 0
 }
 
+/// The largest page size a host kernel for this architecture uses. The
+/// supervisor spaces the fixed tracee addresses it maps by at least this,
+/// so that each is page-aligned on every such kernel.
+pub const MAX_PAGE_SIZE: u64 = 65536;
+
 /// The host kernel's page size, as its auxiliary vector reported it. arm64
 /// kernels are built for 4K, 16K, or 64K pages.
 static mut PAGE_SIZE: u64 = 4096;

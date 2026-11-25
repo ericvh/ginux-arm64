@@ -6,6 +6,7 @@
 //! bounded sendmsg calls because Linux writes `msg_len` into the caller's
 //! array.
 
+use crate::arch::MAX_PAGE_SIZE;
 use crate::supervisor::{
     poke_tracee_bytes, replay_syscall, syscall6, UserRegs, EFAULT, EINVAL, EPERM,
     SYS_PROCESS_VM_READV,
@@ -13,7 +14,14 @@ use crate::supervisor::{
 
 const BASE: u64 = 0x6100_0000_0000;
 const SNAPSHOT_SIZE: usize = 16 * 1024;
-const STRIDE: u64 = SNAPSHOT_SIZE as u64;
+/// One snapshot for each task slot, mapped at a fixed address. The slots are
+/// spaced so that every address is page-aligned whatever page size the host
+/// kernel has; a fixed mapping anywhere else fails with `EINVAL`.
+const STRIDE: u64 = if SNAPSHOT_SIZE as u64 > MAX_PAGE_SIZE {
+    SNAPSHOT_SIZE as u64
+} else {
+    MAX_PAGE_SIZE
+};
 const END: u64 = BASE + 128 * STRIDE;
 const MAX_MESSAGES: usize = 16;
 const MAX_IOV: usize = 16;

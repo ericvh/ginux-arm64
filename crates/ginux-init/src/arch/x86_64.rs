@@ -303,6 +303,11 @@ pub fn after_wait(_pid: usize, _status: i32) {}
 #[inline(always)]
 pub fn at_start(_initial_stack: *const usize) {}
 
+/// The largest page size a host kernel for this architecture uses. The
+/// supervisor spaces the fixed tracee addresses it maps by at least this,
+/// so that each is page-aligned on every such kernel.
+pub const MAX_PAGE_SIZE: u64 = 4096;
+
 /// The host kernel's page size in bytes. x86-64 Linux has one.
 #[inline(always)]
 pub fn page_size() -> u64 {
