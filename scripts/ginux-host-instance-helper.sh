@@ -836,7 +836,11 @@ start_instance() {
     pid=$!
     record_supervisor "$runtime_directory" "$pid"
     sleep 1
-    if ! kill -0 "$pid" 2>/dev/null; then
+    # A supervisor that is gone after a second failed to start, unless it
+    # recorded that its instance finished cleanly: on a fast host a short
+    # command is over before this looks.
+    if ! kill -0 "$pid" 2>/dev/null &&
+        test "$(cat "$runtime_directory/exit.status" 2>/dev/null)" != 0; then
         rm -f "$runtime_directory/supervisor.pid"
         printf '%s: failed to start; inspect %s and %s\n' \
             "$name" "$directory/console.log" "$directory/audit.log" >&2
