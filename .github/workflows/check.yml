@@ -88,11 +88,17 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
     runs-on: ubuntu-24.04-arm
+    env:
+      # The toolchain this tree is checked with. The runner's default is
+      # newer, and its clippy rejects a loop in upstream's ginux-runtime
+      # that the x86_64 check job's toolchain accepts.
+      RUSTUP_TOOLCHAIN: "1.99.1"
     steps:
       - uses: actions/checkout@v5
       - run: sudo apt-get update && sudo apt-get install -y qemu-system-arm cpio
-      - run: rustup component add clippy
-      - run: rustup target add aarch64-unknown-linux-gnu aarch64-unknown-none
+      - run: >-
+          rustup toolchain install 1.99.1 --profile minimal --component clippy
+          --target aarch64-unknown-linux-gnu --target aarch64-unknown-none
       - run: make build-arm64
       - run: make check-arm64
       # The runner is arm64, so the smoke test needs no emulator.
