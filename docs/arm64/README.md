@@ -40,8 +40,58 @@ v9fs test harness publishes these on its `kernel-v*` releases.
 | Target | What it proves |
 |--------|----------------|
 | `gate1-aarch64-guest` | The interception demonstration: emulated `getpid` 4242, mediated `write` not executed, `uname` denied, `GATE1: PASS`. |
-| `native-aarch64-guest` | `ginux native` under the seccomp trace filter: `clone` denied with `-38`, a tracee `brk #0` stepped over, virtual tid and PI-futex results, a `clone3` snapshot in parent and child, and a `close_range` across the protected descriptors. |
+| `native-aarch64-guest` | `ginux native` under the seccomp trace filter, with a fixture that reads its own registers: `clone` denied with `-38`, a tracee `brk #0` failing the instance, virtual tid and PI-futex results, a `clone3` snapshot in parent and child, and a `close_range` across the protected descriptors, each with `x8` preserved. |
+| `native-suite-aarch64-guest` | Upstream's `scripts/test-native-supervision.py`, unmodified, against the aarch64 daemon: 42 checks. |
 | `gate1-x86_64-guest` | The x86_64 demonstration in a guest. Set `GINUX_X86_64_KERNEL` to a `bzImage`. |
+
+### Upstream's native-supervision suite
+
+```sh
+make build-arm64 build-launch-fixture-arm64
+
+# On an arm64 host:
+sudo make test-native-supervision-arm64
+
+# On any other host, in a guest:
+export GINUX_AARCH64_ROOTFS=/path/to/arm64-rootfs.tar
+make native-suite-aarch64-guest
+```
+
+`build-launch-fixture-arm64` compiles `tests/fixtures/native-fixture.c`, the
+same source `build-launch-fixture` compiles for x86_64, with
+`aarch64-linux-gnu-gcc` (`ARM64_CC` overrides it; an arm64 host uses `cc`).
+
+`GINUX_AARCH64_ROOTFS` is a tar archive of an arm64 root filesystem that has
+`/bin/sh` and `python3`. One way to make it:
+
+```sh
+docker pull --platform linux/arm64 python:3.13-alpine
+docker export "$(docker create --platform linux/arm64 python:3.13-alpine)" -o arm64-rootfs.tar
+```
+
+The guest script unpacks it into an initramfs, shares the daemon, the
+fixtures, and the test scripts over virtio-9p, and runs the scripts as root.
+
+The scenarios in the fixture name every call by its x86-64 number, as the
+contract does. `tests/fixtures/native-fixture-aarch64.h` issues each one the
+way an aarch64 C library would. A number that exists on both tables is
+looked up in a header generated from `crates/ginux-core/src/syscall_map.rs`.
+A call the aarch64 table lacks becomes its modern form: `open` is `openat`,
+`dup2` is `dup3`, `fork` is `clone`, `poll` is `ppoll`, `mkdir` is `mkdirat`.
+The x86_64 fixture is unchanged: it compiles to the same binary as
+upstream's file.
+
+Two scenarios differ on aarch64, both for reasons in the architecture:
+
+- `int80` has no counterpart. A 64-bit aarch64 task has one syscall ABI.
+  The scenario executes `brk #0` instead, and the check accepts the
+  unexpected-trap failure it also accepts from an x86-64 host without IA32
+  emulation.
+- `juggled-pids` checks that `kill` and `pidfd_open` leave the caller's pid
+  in the first argument register. On aarch64 that register returns the
+  result, so those two checks pass by construction. The `waitid` checks in
+  `null-wait` and `zero-effects` use the second argument register and are
+  real on both.
 
 ## Design
 
@@ -81,7 +131,14 @@ argument, and has no separate `orig_rax`. The translation therefore:
   replay;
 - leaves the tracee's `x8` alone at an entry and changes the call through
   `NT_ARM_SYSTEM_CALL`. A replay that runs a different call borrows `x8` and
-  the exit write that ends the sequence gives it back.
+  the exit write that ends the sequence gives it back;
+- gives a restarted call the first argument the supervisor left at its exit
+  stop. On x86-64 that is the `rdi` the supervisor wrote. On aarch64 the
+  kernel restarts with the `x0` it last dispatched, which is the value the
+  supervisor issued at the entry (a host pid, where the caller passed a
+  virtual one). The entry stop of the restart puts the exit value back.
+  Kernels before the tracer's `x0` became authoritative for the restart
+  already pass the caller's own value, and nothing is changed there.
 
 Three argument encodings differ between the ABIs and are converted in both
 directions: `clone` takes `tls` before `child_tid`; `O_DIRECTORY`,
@@ -99,11 +156,14 @@ machine. An aarch64 entry point must be 4-byte aligned.
 ## Verified
 
 Run on an x86_64 host with QEMU 10.2 and the v9fs `kernel-v7.4-rc1` arm64
-image, after rebasing onto upstream `f4b85186` (pull request #333):
+image, on upstream `f4b85186` (pull request #333):
 
 - `make check` and `make check-arm64` pass; `make test-unit` passes.
 - `make arch-smoke`, `make arch-smoke-arm64`, `make gate1-aarch64-guest`, and
   `make native-aarch64-guest` pass.
+- `make native-suite-aarch64-guest` passes: all 42 checks of
+  `test-native-supervision.py`, in an Alpine 3 arm64 userland with Python
+  3.13.
 - The upstream x86_64 integration suite is unchanged in result:
   `test-launch`, `test-native-supervision` (all eight scripts),
   `test-process-native`, `test-gate1-setup`, and `test-tracee-kill` pass.
@@ -125,12 +185,13 @@ target. What is not covered:
   one of them is skipped on aarch64 and fails closed.
 - **Launch's vDSO list** names the x86-64 vDSO entries. aarch64 has no vDSO
   `time` or `getcpu`.
-- **Coverage.** The upstream native-supervision suite uses an x86-64 C
-  fixture and has not been ported. The aarch64 guest test covers five
-  scenarios. systemd instances, OCI images, networking, and the allocator
+- **Coverage.** Of upstream's eight native-supervision scripts, the main one
+  runs on aarch64. The other seven (`test-native-yield-broker.py`, the two
+  clone scripts, the two `close_range` scripts, and the two send-snapshot
+  scripts) trace the daemon itself and decode its registers as x86-64
+  `user_regs_struct`; they are not ported. `test-launch`,
+  `test-process-native`, systemd instances, OCI images, and the allocator
   have not been run on aarch64.
-- **One behavioural difference.** A tracee's own `brk #0` is stepped over on
-  aarch64. On x86-64 an unexpected trap still fails closed.
 - `make gate1-x86_64-guest` was not run in this pass.
 
 ## Bare-metal kernel

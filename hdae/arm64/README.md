@@ -37,8 +37,10 @@ say an isolation unit is a "domain" they predate upstream's rename to
 | `gates/A3-legacy-kernel.md` | 17 | Legacy-kernel entry on `qemu-system-aarch64` |
 | `gates/A4-uefi-kernel.md` | 18 | UEFI kernel with SBSA services |
 | `gates/A5-linux-svc.md` | 19 | AArch64 Linux syscall table on the UEFI boot |
+| `gates/A6-native-supervision-suite.md` | none | Upstream's native-supervision suite on aarch64 |
 
-None of the five was accepted by a human reviewer. They stay open.
+A6 was written on `arm64/main`, after the rebase below. None of the six was
+accepted by a human reviewer. They stay open.
 
 ## Rebase onto current upstream (2026-11-25)
 
@@ -75,7 +77,10 @@ Differences from the original stack worth knowing:
 
 ## Next gate, if the track continues
 
-The useful next step is an aarch64 build of upstream's native-supervision
-fixture, so the eight `test-native-*` scripts run against the aarch64 daemon
-in a guest. That would replace the five-scenario guest test as the evidence
-for mediation on aarch64.
+Seven of upstream's native-supervision scripts trace the daemon itself and
+read its registers as x86-64 `user_regs_struct`: the yield broker, the two
+clone scripts, the two `close_range` scripts, and the two send-snapshot
+scripts. They need one shared reader of the daemon's own ptrace calls for
+each architecture. On aarch64 the daemon stages a tracee's registers with
+`PTRACE_SETREGSET`, not `PTRACE_SETREGS`. Porting them would put the replay
+races under test on aarch64, which the main suite does not reach.
