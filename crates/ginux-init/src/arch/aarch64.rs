@@ -368,6 +368,16 @@ struct SavedCall {
     /// The tracee's own `x8`, held while a replay runs another call.
     x8_held: bool,
     x8: u64,
+    /// `x0` as the kernel last dispatched a call for this task.
+    sent_x0: u64,
+    /// A call that returned a restart result, as the supervisor left it at
+    /// the exit stop. It outlives the calls a signal handler makes before
+    /// the kernel runs the interrupted call again.
+    restart: bool,
+    restart_pc: u64,
+    restart_nr: u64,
+    restart_args: [u64; 6],
+    restart_x0: u64,
 }
 
 const EMPTY_CALL: SavedCall = SavedCall {
@@ -379,6 +389,12 @@ const EMPTY_CALL: SavedCall = SavedCall {
     issued: 0,
     x8_held: false,
     x8: 0,
+    sent_x0: 0,
+    restart: false,
+    restart_pc: 0,
+    restart_nr: 0,
+    restart_args: [0; 6],
+    restart_x0: 0,
 };
 
 /// One record per tracee inside a syscall. The native supervisor tracks at
@@ -601,9 +617,52 @@ fn exchange_arguments(nr: u64, args: &mut [u64; 6]) {
     }
 }
 
+/// Whether a syscall result makes the kernel run the call again:
+/// `ERESTARTSYS`, `ERESTARTNOINTR`, `ERESTARTNOHAND`, `ERESTART_RESTARTBLOCK`.
+fn restart_result(result: u64) -> bool {
+    matches!(result as i64, -512 | -513 | -514 | -516)
+}
+
+/// Give a restarted call the first argument the supervisor left at its exit.
+///
+/// On x86-64 the first argument has its own register, so what the supervisor
+/// writes to `rdi` at the exit stop is what the kernel runs the call with
+/// again. aarch64 has only `x0`, which holds the result at the exit stop,
+/// and the kernel restarts with the first argument it last dispatched: the
+/// value the supervisor issued at the entry. This puts the exit value back
+/// in `x0`, in the tracee and in `raw`, when the stop is that restart.
+fn restore_restarted_argument(pid: usize, raw: &mut UserPtRegs, nr: u64, args: &mut [u64; 6]) {
+    let Some(slot) = find_call(pid) else {
+        return;
+    };
+    let mut record = unsafe { core::ptr::read(slot) };
+    if !record.restart || record.restart_pc != raw.pc || record.restart_nr != nr {
+        return;
+    }
+    // The call at this address ran again or was issued anew; either way the
+    // record is spent.
+    record.restart = false;
+    unsafe { core::ptr::write(slot, record) };
+    if raw.regs[0] != record.restart_x0 || args[1..] != record.restart_args[1..] {
+        return;
+    }
+    let mut wanted = record.restart_args;
+    exchange_arguments(nr, &mut wanted);
+    if wanted[0] == raw.regs[0] {
+        return;
+    }
+    let dispatched = raw.regs[0];
+    raw.regs[0] = wanted[0];
+    if write_raw(pid, raw) {
+        args[0] = record.restart_args[0];
+    } else {
+        raw.regs[0] = dispatched;
+    }
+}
+
 /// Fill the logical x86-64 register file from `user_pt_regs`.
 pub fn read_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
-    let Some(raw) = read_raw(pid) else {
+    let Some(mut raw) = read_raw(pid) else {
         return -1;
     };
     let kind = stop_kind(pid);
@@ -633,6 +692,7 @@ pub fn read_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
         }
         SYSCALL_INFO_ENTRY | SYSCALL_INFO_SECCOMP => {
             exchange_arguments(nr, &mut args);
+            restore_restarted_argument(pid, &mut raw, nr, &mut args);
             let slot = claim_call(pid);
             unsafe {
                 let mut record = core::ptr::read(slot);
@@ -640,6 +700,7 @@ pub fn read_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
                 record.nr = nr;
                 record.args = args;
                 record.issued = nr;
+                record.sent_x0 = raw.regs[0];
                 core::ptr::write(slot, record);
             }
             (ENTRY_RAX, ENTRY_PHASE)
@@ -755,6 +816,17 @@ pub fn write_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
             EXIT_PHASE if record.x8_held => {
                 raw.regs[8] = record.x8;
                 record.x8_held = false;
+            }
+            _ => {}
+        }
+        match phase {
+            ENTRY_PHASE | REPLAY_PHASE if !skip => record.sent_x0 = raw.regs[0],
+            EXIT_PHASE if restart_result(logical.rax) => {
+                record.restart = true;
+                record.restart_pc = logical.rip;
+                record.restart_nr = logical.orig_rax;
+                record.restart_args = logical_args;
+                record.restart_x0 = record.sent_x0;
             }
             _ => {}
         }
