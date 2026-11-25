@@ -1,5 +1,8 @@
 /* Native end-to-end workloads. Each CASE selects an independent native scenario. */
 typedef unsigned long word;
+#if defined(__aarch64__)
+#include "fixture-aarch64.h"
+#else
 static long call3(long n, word a, word b, word c) {
     long r;
     register word r10 __asm__("r10")=0, r8 __asm__("r8")=0, r9 __asm__("r9")=0;
@@ -12,6 +15,7 @@ static long __attribute__((unused)) call4(long n, word a, word b, word c, word d
     __asm__ volatile("syscall" : "=a"(r) : "a"(n), "D"(a), "S"(b), "d"(c), "r"(r10), "r"(r8), "r"(r9) : "rcx","r11","memory");
     return r;
 }
+#endif
 static void show(const char *label, long value) {
     char buffer[128], digits[32];
     word n=0, count=0;
@@ -85,9 +89,22 @@ void thread_body(void) {
     __atomic_store_n(&done,1,__ATOMIC_RELEASE);
 #endif
 }
+#if defined(__aarch64__)
+/* clone (220) takes the child tid cell fifth, after tls; exit is 93. */
+__asm__(".global make_thread\nmake_thread:\n"
+        "mov x4,x3\nmov x3,#0\nmov x8,#220\nsvc #0\ncbnz x0,1f\n"
+        "bl thread_body\nmov x0,#0\nmov x8,#93\nsvc #0\n1: ret\n");
+/* vfork is clone(CLONE_VM|CLONE_VFORK|SIGCHLD). The child runs on the
+ * parent's stack, so the call is made here, with no frame of its own. */
+extern long fixture_vfork(void);
+__asm__(".global fixture_vfork\nfixture_vfork:\n"
+        "mov x0,#0x4111\nmov x1,#0\nmov x2,#0\nmov x3,#0\nmov x4,#0\n"
+        "mov x8,#220\nsvc #0\nret\n");
+#else
 __asm__(".global make_thread\nmake_thread:\n"
         "mov %rcx,%r10\nmov $56,%rax\nsyscall\ntest %rax,%rax\njnz 1f\n"
         "call thread_body\nxor %rdi,%rdi\nmov $60,%rax\nsyscall\n1: ret\n");
+#endif
 long probe_main(word *stack) {
     const char *self=((char **)(stack+1))[0];
     word last=0, i=0;
@@ -439,7 +456,11 @@ long probe_main(word *stack) {
     call3(1,descriptors[1],(word)"x",1);
     show("blocking wait=",call3(61,0xffffffff,0,0));
 #elif defined(CASE_vfork)
+#if defined(__aarch64__)
+    long child=fixture_vfork();
+#else
     long child=call3(58,0,0,0);
+#endif
     if(!child) {
         call3(60,42,0,0);
         __builtin_unreachable();
@@ -453,11 +474,15 @@ long probe_main(word *stack) {
     while(!__atomic_load_n(&done,__ATOMIC_ACQUIRE))call3(186,0,0,0);
 #elif defined(CASE_denied_host_memory)
     // A null iovec makes this a harmless host permission/error probe.
+#if defined(__aarch64__)
+    long result=call6(311,0,0,0,0,0,0);
+#else
     register long r10 __asm__("r10")=0;
     register long r8 __asm__("r8")=0;
     register long r9 __asm__("r9")=0;
     long result;
     __asm__ volatile("syscall" : "=a"(result) : "a"(311),"D"(0),"S"(0),"d"(0),"r"(r10),"r"(r8),"r"(r9) : "rcx","r11","memory");
+#endif
     show("process_vm_writev(311)=",result);
 #elif defined(CASE_alias_writes)
     // Every alias keeps the write rule of the stdio descriptor it names:
@@ -491,4 +516,8 @@ long probe_main(word *stack) {
 #endif
     return 0;
 }
+#if defined(__aarch64__)
+__asm__(".global _start\n_start:\nmov x29,#0\nmov x30,#0\nmov x0,sp\nbl probe_main\nmov x8,#93\nsvc #0\n");
+#else
 __asm__(".global _start\n_start:\nmov %rsp,%rdi\nand $-16,%rsp\ncall probe_main\nmov %rax,%rdi\nmov $60,%rax\nsyscall\n");
+#endif

@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import shutil
 import resource
@@ -10,6 +11,11 @@ import signal
 import subprocess
 import sys
 import tempfile
+
+
+# The fixture opens files with open, which an aarch64 kernel does not have:
+# there the same scenarios issue openat, and the contract names that.
+OPEN, OPEN_NUMBER = ("openat", 257) if platform.machine() == "aarch64" else ("open", 2)
 
 
 def main():
@@ -89,7 +95,9 @@ def main():
         # fcntl cannot make the host kernel signal another process.
         invoke(["guard"], 0, "exited")
         invoke(["fork"], 0, "exited")
-        invoke(["int80"], 1, "supervisor-error")
+        # The 32-bit entry of x86-64. A 64-bit aarch64 task has one syscall ABI.
+        if platform.machine() != "aarch64":
+            invoke(["int80"], 1, "supervisor-error")
         invoke(["descriptor"], 0, "exited")
         invoke(["list"], 0, "exited", stdout=b"input\n")
         # A directory as a standard stream would anchor *at calls outside the
@@ -149,9 +157,9 @@ def main():
             if not re.search(record, proc.stderr, re.M):
                 raise RuntimeError(f"missing winning denial: {proc.stderr!r}")
 
-        denied(["cwd"], 91, "syscall.open", 2, changes=rules(syscall_deny=["syscall.open"]))
+        denied(["cwd"], 91, f"syscall.{OPEN}", OPEN_NUMBER, changes=rules(syscall_deny=[f"syscall.{OPEN}"]))
         denied(["cwd"], 0, "syscall.write", 1, changes=rules(deny=["syscall.write"]))
-        denied(["cwd"], 91, "filesystem.path.read", 2, changes=rules(deny=["filesystem.path.read"]))
+        denied(["cwd"], 91, "filesystem.path.read", OPEN_NUMBER, changes=rules(deny=["filesystem.path.read"]))
         denied(["args", "hidden"], 0, "device.console.write", 1, changes=rules(deny=["device.console.write"]))
         denied(["handler"], 86, "signal.virtual.deliver", 13, changes=rules(deny=["signal.virtual.deliver"]))
         for selector in ("device.console.read", "proc.system.read", "sys.device.read",
@@ -162,7 +170,7 @@ def main():
         invoke(["exit"], 0, "exited", changes=rules(deny=[
             "device.mmio.direct", "device.dma.direct", "network.packet.raw", "network.*"]))
         proc = invoke(["cwd"], 91, "exited", changes=rules(allow=["filesystem.path.read", "syscall.exit"], syscall_allow=["syscall.exit_group"]))
-        if not re.search(rb"operation=syscall.open policy-source=default-deny policy-rule=0 action=deny result=-38", proc.stderr):
+        if not re.search(b"operation=syscall." + OPEN.encode() + rb" policy-source=default-deny policy-rule=0 action=deny result=-38", proc.stderr):
             raise RuntimeError("missing default syscall denial")
         denied(["args", "hidden"], 0, "syscall.write", 1,
                changes=rules(allow=["syscall.exit_group"], syscall_deny=["syscall.write"]))

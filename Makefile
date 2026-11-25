@@ -69,9 +69,11 @@ build:
 	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo build -p runtime-fixture --target $(X86_TARGET) --release
 	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo build -p process-native-fixture --target $(X86_TARGET) --release
 
+PROCESS_SCENARIOS := syscall_abi untraced_clone shared_pipe wait_status thread_reuse denied_host_memory inherited_fds thread_exec unused_parent_tid exec_failure copied_files shared_exec clone_tid child_signal nonblocking_wait vfork concurrent_wait remaining_wait sigpipe segv kill_badsig thread_segv thread_term parked_kill parked_term orphan_reparent orphan_zombie ro_status bad_status bad_rusage straddle_status ro_clone_tid bad_clone_tid straddle_clone_tid alias_writes
+
 build-process-fixtures:
 	mkdir -p .artifacts/process
-	@for scenario in syscall_abi untraced_clone shared_pipe wait_status thread_reuse denied_host_memory inherited_fds thread_exec unused_parent_tid exec_failure copied_files shared_exec clone_tid child_signal nonblocking_wait vfork concurrent_wait remaining_wait sigpipe segv kill_badsig thread_segv thread_term parked_kill parked_term orphan_reparent orphan_zombie ro_status bad_status bad_rusage straddle_status ro_clone_tid bad_clone_tid straddle_clone_tid alias_writes; do \
+	@for scenario in $(PROCESS_SCENARIOS); do \
 		$(CC) -nostdlib -static -fno-stack-protector -fno-builtin -O2 -DCASE_$$scenario tests/fixtures/process-review-fixture.c -o .artifacts/process/$$scenario || exit; \
 	done
 	$(CC) -nostdlib -static tests/fixtures/process-exec-target.S -o .artifacts/process/process-exec-target
@@ -485,9 +487,11 @@ QEMU_AARCH64 ?= qemu-aarch64-static
 # The C compiler for aarch64 fixtures: the host's on an arm64 host.
 ARM64_CC ?= $(if $(filter aarch64,$(shell uname -m)),$(CC),aarch64-linux-gnu-gcc)
 ARM64_LAUNCH := .artifacts/launch-arm64
-ARM64_FIXTURE_CFLAGS := -nostdlib -static -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror -I$(ARM64_LAUNCH)
+# No libgcc is linked, so atomics are inline instructions, not its helpers.
+ARM64_FIXTURE_BASE_CFLAGS := -nostdlib -static -fno-stack-protector -fno-builtin -O2 -mno-outline-atomics -I$(ARM64_LAUNCH)
+ARM64_FIXTURE_CFLAGS := $(ARM64_FIXTURE_BASE_CFLAGS) -Wall -Wextra -Werror
 
-.PHONY: build-arm64 check-arm64 arch-smoke arch-smoke-arm64 gate1-aarch64-guest gate1-x86_64-guest native-aarch64-guest legacy-kernel-aarch64 uefi-aarch64-guest build-launch-fixture-arm64 test-native-supervision-arm64 native-suite-aarch64-guest build-arm64-host-suite host-image-fetch-arm64 test-arm64
+.PHONY: build-arm64 check-arm64 arch-smoke arch-smoke-arm64 gate1-aarch64-guest gate1-x86_64-guest native-aarch64-guest legacy-kernel-aarch64 uefi-aarch64-guest build-launch-fixture-arm64 build-gate1-fixture-arm64 build-process-fixtures-arm64 build-fixtures-arm64 test-native-supervision-arm64 test-launch-arm64 test-gate1-setup-arm64 test-tracee-kill-arm64 test-process-native-arm64 test-integration-arm64 native-suite-aarch64-guest integration-aarch64-guest build-arm64-host-suite host-image-fetch-arm64 test-arm64
 
 build-arm64:
 	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo build -p ginux-init --target $(ARM64_TARGET) --release
@@ -513,23 +517,64 @@ gate1-x86_64-guest: build
 native-aarch64-guest: build-arm64
 	@./scripts/native-aarch64-guest.sh
 
-# Upstream's native-supervision fixture, built for aarch64 from the same
-# source. Its x86-64 syscall numbers are mapped through a table generated
-# from crates/ginux-core.
+# Upstream's C fixtures, built for aarch64 from the same sources. Their
+# x86-64 syscall numbers are mapped through a table generated from
+# crates/ginux-core.
+ARM64_GATE1 := .artifacts/gate1-arm64
+ARM64_PROCESS := .artifacts/process-arm64
+ARM64_PAYLOAD := target/$(ARM64_TARGET)/release/managed-payload
+ARM64_PROCESS_NATIVE_FIXTURE := target/$(ARM64_TARGET)/release/process-native-fixture
+
 build-launch-fixture-arm64:
 	@mkdir -p $(ARM64_LAUNCH)
 	./scripts/aarch64-syscall-header.sh > $(ARM64_LAUNCH)/syscall-map-aarch64.h
+	$(ARM64_CC) $(ARM64_FIXTURE_CFLAGS) tests/fixtures/launch-fixture.c -o $(ARM64_LAUNCH)/launch-fixture
 	$(ARM64_CC) $(ARM64_FIXTURE_CFLAGS) tests/fixtures/native-fixture.c -o $(ARM64_LAUNCH)/native-fixture
 	$(ARM64_CC) $(ARM64_FIXTURE_CFLAGS) -DCLONE_SNAPSHOT_COLLISION -Wl,--section-start=.ginux_clone_collision=0x600000000000 tests/fixtures/native-fixture.c -o $(ARM64_LAUNCH)/native-clone-collision-fixture
 
-# Upstream's test script against the aarch64 daemon. Run as root on an arm64
-# host, after build-arm64 and build-launch-fixture-arm64.
+build-gate1-fixture-arm64: build-launch-fixture-arm64
+	@mkdir -p $(ARM64_GATE1)
+	$(ARM64_CC) $(ARM64_FIXTURE_CFLAGS) -DDENY_PTRACE tests/fixtures/gate1-setup-fixture.c -o $(ARM64_GATE1)/deny-ptrace
+	$(ARM64_CC) $(ARM64_FIXTURE_CFLAGS) tests/fixtures/gate1-setup-fixture.c -o $(ARM64_GATE1)/payload
+
+build-process-fixtures-arm64: build-launch-fixture-arm64
+	@mkdir -p $(ARM64_PROCESS)
+	@for scenario in $(PROCESS_SCENARIOS); do \
+		$(ARM64_CC) $(ARM64_FIXTURE_BASE_CFLAGS) -DCASE_$$scenario tests/fixtures/process-review-fixture.c -o $(ARM64_PROCESS)/$$scenario || exit; \
+	done
+	$(ARM64_CC) -nostdlib -static tests/fixtures/process-exec-target-aarch64.S -o $(ARM64_PROCESS)/process-exec-target
+	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo build -p process-native-fixture --target $(ARM64_TARGET) --release
+
+build-fixtures-arm64: build-launch-fixture-arm64 build-gate1-fixture-arm64 build-process-fixtures-arm64
+
+# Upstream's test scripts against the aarch64 daemon. Run as root on an arm64
+# host, after build-arm64 and build-fixtures-arm64.
 test-native-supervision-arm64:
 	python3 scripts/test-native-supervision.py $(GINUX_ARM64) $(ARM64_LAUNCH)/native-fixture
 
-# The same script in an arm64 guest, for hosts of another architecture.
+test-launch-arm64:
+	python3 scripts/test-launch.py $(GINUX_ARM64) $(ARM64_LAUNCH)/launch-fixture
+
+test-gate1-setup-arm64:
+	python3 scripts/test-gate1-setup.py $(GINUX_ARM64) $(ARM64_GATE1)/deny-ptrace $(ARM64_GATE1)/payload
+
+test-tracee-kill-arm64:
+	python3 scripts/test-tracee-kill.py $(GINUX_ARM64) $(ARM64_GATE1)/deny-ptrace $(ARM64_GATE1)/payload $(ARM64_PAYLOAD) $(ARM64_LAUNCH)/native-fixture
+
+test-process-native-arm64:
+	python3 scripts/test-process-native.py $(GINUX_ARM64) $(ARM64_PROCESS) $(ARM64_PROCESS_NATIVE_FIXTURE) $(SCENARIO)
+
+test-integration-arm64: test-launch-arm64 test-native-supervision-arm64 test-gate1-setup-arm64 test-tracee-kill-arm64 test-process-native-arm64
+
+# The same scripts in a minimal arm64 guest, for hosts of another
+# architecture. TESTS names the ones to run. test-launch and test-tracee-kill
+# need more of a distribution than that guest has (CONFIG_PROC_CHILDREN,
+# util-linux setpriv); `make test-arm64` runs all five on the Rocky host.
 native-suite-aarch64-guest: build-arm64 build-launch-fixture-arm64
-	@./scripts/native-suite-aarch64-guest.sh
+	@./scripts/native-suite-aarch64-guest.sh supervision
+
+integration-aarch64-guest: build-arm64 build-fixtures-arm64
+	@./scripts/native-suite-aarch64-guest.sh $(or $(TESTS),supervision gate1-setup process-native)
 
 # Upstream's `make test` host suite against a Rocky Linux 10 aarch64 host.
 # The scripts are upstream's; ROCKY_ARCH selects the image, the emulator, and
@@ -547,10 +592,11 @@ build-arm64-host-suite: build-arm64
 host-image-fetch-arm64:
 	@ROCKY_ARCH=aarch64 ./scripts/fetch-rocky-host.sh
 
-# One boot of the host runs every script, in the order `make test` does.
-test-arm64: build-arm64-host-suite
+# One boot of the host runs every script, in the order `make test` does,
+# then the integration test scripts as root on the same host.
+test-arm64: build-arm64-host-suite build-fixtures-arm64
 	@ROCKY_ARCH=aarch64 ./scripts/test-rocky-instance.sh
-	@ROCKY_ARCH=aarch64 ./scripts/with-rocky-host.sh ./scripts/test-host-suite.sh
+	@ROCKY_ARCH=aarch64 ./scripts/with-rocky-host.sh sh -c './scripts/test-host-suite.sh && ./scripts/test-integration-host.sh'
 
 # The bare-metal kernel line is its own workspace under baremetal/.
 legacy-kernel-aarch64 uefi-aarch64-guest:

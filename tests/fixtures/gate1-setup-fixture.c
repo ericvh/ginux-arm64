@@ -1,4 +1,5 @@
-/* Freestanding x86-64 programs for the Gate 1 ptrace setup failure check.
+/* Freestanding programs for the Gate 1 ptrace setup failure check, for
+ * x86-64 and aarch64.
  *
  * Built with -DDENY_PTRACE: `deny-ptrace <request> <program> [args...]`
  * installs a seccomp filter that fails ptrace(<request>, ...) with EPERM and
@@ -11,6 +12,21 @@
  * /var/tmp/gate1-payload-ran. Installed as /var/tmp/ginux-managed-payload, it
  * shows whether the payload got past the stop after execve. */
 typedef unsigned long word;
+
+#if defined(__aarch64__)
+#include "fixture-aarch64.h"
+#define AUDIT_ARCH 0xc00000b7 /* AUDIT_ARCH_AARCH64 */
+#define HOST_PTRACE 117
+
+#ifdef DENY_PTRACE
+static long prctl(word option, word a, word b)
+{
+    return call5(157, option, a, b, 0, 0);
+}
+#endif
+#else
+#define AUDIT_ARCH 0xc000003e /* AUDIT_ARCH_X86_64 */
+#define HOST_PTRACE 101
 
 static long call3(long number, word a, word b, word c)
 {
@@ -33,7 +49,10 @@ static long prctl(word option, word a, word b)
                      : "rcx", "r11", "memory");
     return result;
 }
+#endif
+#endif
 
+#ifdef DENY_PTRACE
 struct filter {
     unsigned short code;
     unsigned char jt, jf;
@@ -57,9 +76,9 @@ long fixture_main(long argc, char **argv, char **envp)
     if (argc < 3) return 90;
     static struct filter filter[] = {
         {0x20, 0, 0, 4},              /* ld seccomp_data.arch */
-        {0x15, 0, 5, 0xc000003e},     /* jeq AUDIT_ARCH_X86_64 */
+        {0x15, 0, 5, AUDIT_ARCH},     /* jeq this architecture */
         {0x20, 0, 0, 0},              /* ld seccomp_data.nr */
-        {0x15, 0, 3, 101},            /* jeq ptrace */
+        {0x15, 0, 3, HOST_PTRACE},    /* jeq ptrace */
         {0x20, 0, 0, 16},             /* ld seccomp_data.args[0] (low word) */
         {0x15, 0, 1, 0},              /* jeq <request>, set below */
         {0x06, 0, 0, 0x00050000 | 1}, /* ret SECCOMP_RET_ERRNO | EPERM */
@@ -92,6 +111,19 @@ long fixture_main(long argc, char **argv, char **envp)
 }
 #endif
 
+#if defined(__aarch64__)
+__asm__(".global _start\n"
+        "_start:\n"
+        "mov x29, #0\n"
+        "mov x30, #0\n"
+        "ldr x0, [sp]\n"
+        "add x1, sp, #8\n"
+        "add x2, x1, x0, lsl #3\n"
+        "add x2, x2, #8\n"
+        "bl fixture_main\n"
+        "mov x8, #94\n"
+        "svc #0\n");
+#else
 __asm__(".global _start\n"
         "_start:\n"
         "mov (%rsp), %rdi\n"
@@ -102,3 +134,4 @@ __asm__(".global _start\n"
         "mov %rax, %rdi\n"
         "mov $231, %rax\n"
         "syscall\n");
+#endif

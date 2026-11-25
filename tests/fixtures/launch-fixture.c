@@ -1,5 +1,19 @@
-/* Freestanding x86-64 workload for end-to-end launch checks. */
+/* Freestanding workload for end-to-end launch checks, for x86-64 and
+ * aarch64. */
 typedef unsigned long word;
+
+#if defined(__aarch64__)
+#include "fixture-aarch64.h"
+
+/* Signal return trampoline (SA_RESTORER): rt_sigreturn (139). */
+void launch_fixture_restore(void);
+__asm__(".global launch_fixture_restore\n"
+        "launch_fixture_restore:\n"
+        "mov x8, #139\n"
+        "svc #0\n");
+#else
+#define spin_wait() __asm__ volatile("pause")
+#define breakpoint() __asm__ volatile("int3")
 
 static long call3(long number, word a, word b, word c)
 {
@@ -27,14 +41,29 @@ __asm__(".global launch_fixture_restore\n"
         "mov $15, %eax\n"
         "syscall\n"
         "ud2\n");
+#endif
 
 static volatile int handled;
 
+#if defined(__aarch64__)
+/* A brk reports with pc still at the instruction, so the handler steps over
+ * it: pc is 440 bytes into the ucontext. SA_SIGINFO passes the ucontext. */
+#define HANDLER_FLAGS (0x04000000 /* SA_RESTORER */ | 4 /* SA_SIGINFO */)
+static void on_signal(int signal, void *information, void *context)
+{
+    (void)signal;
+    (void)information;
+    handled = 1;
+    *(word *)((char *)context + 440) += 4;
+}
+#else
+#define HANDLER_FLAGS 0x04000000 /* SA_RESTORER */
 static void on_signal(int signal)
 {
     (void)signal;
     handled = 1;
 }
+#endif
 
 static word length(const char *value)
 {
@@ -92,12 +121,19 @@ long launch_fixture_main(word *stack)
         call3(1, 1, (word)buffer, count);
         return 0;
     }
-    case 't': __asm__ volatile("int3"); return 93;
+    case 't': breakpoint(); return 93;
+#if defined(__aarch64__)
+    case 's': __asm__ volatile("mov x0, #0\nldr x0, [x0]" ::: "x0", "memory"); return 94;
+#else
     case 's': __asm__ volatile("xor %%rax, %%rax; mov (%%rax), %%rax" ::: "rax", "memory"); return 94;
+#endif
     case 'f': return call3(57, 0, 0, 0) == -38 ? 0 : 95;
+#if !defined(__aarch64__)
+    /* The 32-bit entry. A 64-bit aarch64 task has no second syscall ABI. */
     case 'i':
         __asm__ volatile("int $0x80" :: "a"(20), "b"(1), "c"(0), "d"(0) : "memory");
         return 96;
+#endif
     case 'd': {
         char byte;
         word fd = argc > 2 ? number(argv[2]) : 3;
@@ -121,17 +157,17 @@ long launch_fixture_main(word *stack)
     }
     case 'w':
         print("ready");
-        for (;;) __asm__ volatile("pause");
+        for (;;) spin_wait();
     case 'b':
         for (word i = 0; i < 4000; ++i) call3(39, 0, 0, 0);
         return 0;
     case 'h': {
         /* SIGTRAP handler installed with rt_sigaction; it must return through
-         * rt_sigreturn and resume after the int3. */
+         * rt_sigreturn and resume after the breakpoint. */
         struct { word handler, flags, restorer, mask; } action = {
-            (word)on_signal, 0x04000000 /* SA_RESTORER */, (word)launch_fixture_restore, 0};
+            (word)on_signal, HANDLER_FLAGS, (word)launch_fixture_restore, 0};
         if (call4(13, 5, (word)&action, 0, 8) != 0) return 86;
-        __asm__ volatile("int3");
+        breakpoint();
         if (!handled) return 87;
         print("handled");
         return 0;
@@ -210,6 +246,16 @@ long launch_fixture_main(word *stack)
     }
 }
 
+#if defined(__aarch64__)
+__asm__(".global _start\n"
+        "_start:\n"
+        "mov x29, #0\n"
+        "mov x30, #0\n"
+        "mov x0, sp\n"
+        "bl launch_fixture_main\n"
+        "mov x8, #93\n"
+        "svc #0\n");
+#else
 __asm__(".global _start\n"
         "_start:\n"
         "mov %rsp, %rdi\n"
@@ -218,3 +264,4 @@ __asm__(".global _start\n"
         "mov %rax, %rdi\n"
         "mov $60, %rax\n"
         "syscall\n");
+#endif

@@ -2,6 +2,7 @@
 """Exercise process-native against existing native binaries."""
 import ctypes
 import os
+import platform
 from pathlib import Path
 import signal
 import struct
@@ -36,9 +37,11 @@ NO_VM_WRITEV_ERRNO = {"/vm-writev-enosys": 38, "/vm-writev-eperm": 1}
 def deny_process_vm_writev(errno):
     """Install a seccomp filter that fails process_vm_writev with errno."""
     libc = ctypes.CDLL(None, use_errno=True)
-    # x86-64 only: load arch, allow others; load nr, errno for 311, else allow.
-    program = [(0x20, 0, 0, 4), (0x15, 0, 3, 0xc000003e), (0x20, 0, 0, 0),
-               (0x15, 0, 1, 311), (0x06, 0, 0, 0x00050000 | errno), (0x06, 0, 0, 0x7fff0000)]
+    # This architecture only: load arch, allow others; load nr, errno for
+    # process_vm_writev, else allow.
+    arch, number = (0xc00000b7, 271) if platform.machine() == "aarch64" else (0xc000003e, 311)
+    program = [(0x20, 0, 0, 4), (0x15, 0, 3, arch), (0x20, 0, 0, 0),
+               (0x15, 0, 1, number), (0x06, 0, 0, 0x00050000 | errno), (0x06, 0, 0, 0x7fff0000)]
     raw = ctypes.create_string_buffer(b"".join(struct.pack("HBBI", *op) for op in program))
 
     class SockFprog(ctypes.Structure):

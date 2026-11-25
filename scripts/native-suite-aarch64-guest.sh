@@ -1,7 +1,7 @@
 #!/bin/sh
-# Run upstream's native-supervision test scripts against the aarch64 daemon
-# in an arm64 Linux guest under qemu-system-aarch64. On an arm64 host the
-# same scripts run directly: `make test-native-supervision-arm64`.
+# Run upstream's integration test scripts against the aarch64 daemon in an
+# arm64 Linux guest under qemu-system-aarch64. On an arm64 host the same
+# scripts run directly: `make test-integration-arm64`.
 #
 #   GINUX_AARCH64_KERNEL   arm64 Linux Image with virtio-9p built in.
 #   GINUX_AARCH64_ROOTFS   tar archive of an arm64 root filesystem that has
@@ -9,8 +9,10 @@
 #                          `docker export` of python:3-alpine for linux/arm64.
 #   GINUX_GUEST_TIMEOUT    seconds before the guest is stopped (default 3600).
 #
-# Arguments name the test scripts to run; the default is every script that
-# `make test-native-supervision-arm64` runs.
+# Arguments name the tests to run: launch, gate1-setup, tracee-kill,
+# process-native, and the native-supervision scripts by the part of their
+# file name after `test-native-` (supervision, yield-broker, ...). The
+# default is supervision.
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
@@ -27,15 +29,12 @@ if [ -z "$rootfs" ] || [ ! -f "$rootfs" ]; then
     exit 2
 fi
 
-ginux=target/aarch64-unknown-linux-gnu/release/ginux
-fixtures=.artifacts/launch-arm64
-for file in "$ginux" "$fixtures/native-fixture" "$fixtures/native-clone-collision-fixture"; do
-    if [ ! -f "$file" ]; then
-        echo "missing $file; run make build-arm64 build-launch-fixture-arm64" >&2
-        exit 2
-    fi
-done
+release=target/aarch64-unknown-linux-gnu/release
+launch=.artifacts/launch-arm64
+gate1=.artifacts/gate1-arm64
+process=.artifacts/process-arm64
 
+. ./scripts/integration-tests.sh
 if [ "$#" -eq 0 ]; then
     set -- supervision
 fi
@@ -47,28 +46,33 @@ tree=$work/rootfs
 log=$work/console.log
 mkdir -p "$share" "$tree"
 
-cp "$ginux" "$share/ginux"
-cp "$fixtures/native-fixture" "$fixtures/native-clone-collision-fixture" "$share/"
-mkdir "$share/scripts" "$share/config"
-cp scripts/test-native-*.py "$share/scripts/"
-cp config/instance-gate5.toml "$share/config/"
-
-# One line per test, in the order the Makefile runs them.
+# One command per test, in the order given. The share mirrors the paths of
+# this tree, so the scripts find config/ beside scripts/ as they do here.
 {
     echo "set -u"
+    echo "cd /share"
     echo "status=0"
     for name in "$@"; do
-        case $name in
-            clone-snapshot)
-                extra=/share/native-clone-collision-fixture ;;
-            *)
-                extra= ;;
-        esac
         echo "echo 'GINUX_GUEST_TEST: $name'"
-        echo "python3 /share/scripts/test-native-$name.py /share/ginux /share/native-fixture $extra || status=1"
+        echo "$(integration_command "$name" "$release" "$launch" "$gate1" "$process") || status=1"
     done
     echo 'exit $status'
 } > "$share/run.sh"
+
+if [ ! -f "$release/ginux" ] || [ ! -f "$launch/native-fixture" ]; then
+    echo "missing the aarch64 daemon or fixtures; run make build-arm64 build-fixtures-arm64" >&2
+    exit 2
+fi
+mkdir -p "$share/$release" "$share/.artifacts" "$share/scripts" "$share/config"
+cp "$release/ginux" "$share/$release/"
+for file in managed-payload process-native-fixture; do
+    if [ -f "$release/$file" ]; then cp "$release/$file" "$share/$release/"; fi
+done
+for directory in "$launch" "$gate1" "$process"; do
+    if [ -d "$directory" ]; then cp -R "$directory" "$share/.artifacts/"; fi
+done
+cp scripts/test-*.py "$share/scripts/"
+cp config/*.toml "$share/config/"
 
 tar -xf "$rootfs" -C "$tree" --no-same-owner --exclude='dev/*' 2>/dev/null || {
     echo "could not unpack $rootfs" >&2
@@ -113,13 +117,14 @@ timeout "${GINUX_GUEST_TIMEOUT:-3600}" qemu-system-aarch64 \
 set -e
 
 if ! grep -q "^GINUX_GUEST_STATUS: 0" "$log"; then
-    echo "aarch64 native-supervision suite: FAIL" >&2
+    echo "aarch64 guest tests: FAIL" >&2
     exit 1
 fi
 for name in "$@"; do
-    if ! grep -q "^test-native-$name: PASS" "$log"; then
-        echo "aarch64 guest did not report test-native-$name: PASS" >&2
+    line=$(integration_pass_line "$name")
+    if ! grep -q "^$line" "$log"; then
+        echo "aarch64 guest did not report $line" >&2
         exit 1
     fi
 done
-echo "aarch64 native-supervision suite: PASS"
+echo "aarch64 guest tests: PASS ($*)"
