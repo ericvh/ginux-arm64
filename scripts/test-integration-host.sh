@@ -36,7 +36,7 @@ done
 
 ./scripts/check-rocky-host.sh
 rocky_ssh "sudo rm -rf $remote && sudo install -d -m 755 -o $ROCKY_SSH_USER $remote"
-tar -cf - scripts/test-*.py config/*.toml \
+tar -cf - scripts/test-*.py scripts/aarch64-trace.py config/*.toml \
     "$GINUX_RELEASE/ginux" "$GINUX_RELEASE/managed-payload" \
     "$GINUX_RELEASE/process-native-fixture" "$launch" "$gate1" "$process" |
     rocky_ssh "tar -xf - -C $remote"
@@ -46,13 +46,13 @@ for name in "$@"; do
     log=build/integration-$ROCKY_ARCH-$name.log
     command=$(integration_command "$name" "$GINUX_RELEASE" "$launch" "$gate1" "$process")
     printf 'test-integration-host: %s\n' "$name"
-    if ! rocky_ssh "cd $remote && sudo $command" > "$log" 2>&1; then
+    if ! rocky_ssh "cd $remote && sudo env GINUX_TRACE_TIME_SCALE=${GINUX_TRACE_TIME_SCALE:-1} GINUX_TRACE_LOG=${GINUX_TRACE_LOG:-} timeout 1800 $command" > "$log" 2>&1; then
         tail -n 40 "$log" >&2
         printf 'test-integration-host: %s failed; see %s\n' "$name" "$log" >&2
         exit 1
     fi
-    grep -Fqx "$(integration_pass_line "$name")" "$log"
-    printf '%s (%s checks)\n' "$(integration_pass_line "$name")" "$(grep -c '^PASS' "$log")"
+    grep -q "^$(integration_pass_line "$name")" "$log"
+    printf 'test-integration-host: %s passed (%s checks)\n' "$name" "$(grep -c '^PASS' "$log")"
 done
 rocky_ssh "sudo rm -rf $remote"
 printf 'test-integration-host: PASS (%s)\n' "$*"

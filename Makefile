@@ -548,9 +548,18 @@ build-process-fixtures-arm64: build-launch-fixture-arm64
 build-fixtures-arm64: build-launch-fixture-arm64 build-gate1-fixture-arm64 build-process-fixtures-arm64
 
 # Upstream's test scripts against the aarch64 daemon. Run as root on an arm64
-# host, after build-arm64 and build-fixtures-arm64.
+# host, after build-arm64 and build-fixtures-arm64. As root the workloads
+# drop to an unprivileged identity, which must be able to reach this tree;
+# test-process-native-arm64 also runs without root.
 test-native-supervision-arm64:
 	python3 scripts/test-native-supervision.py $(GINUX_ARM64) $(ARM64_LAUNCH)/native-fixture
+	python3 scripts/aarch64-trace.py scripts/test-native-yield-broker.py $(GINUX_ARM64) $(ARM64_LAUNCH)/native-fixture
+	python3 scripts/aarch64-trace.py scripts/test-native-clone-snapshot.py $(GINUX_ARM64) $(ARM64_LAUNCH)/native-fixture $(ARM64_LAUNCH)/native-clone-collision-fixture
+	python3 scripts/aarch64-trace.py scripts/test-native-clone-restart.py $(GINUX_ARM64) $(ARM64_LAUNCH)/native-fixture
+	python3 scripts/aarch64-trace.py scripts/test-native-close-range-signal.py $(GINUX_ARM64) $(ARM64_LAUNCH)/native-fixture
+	python3 scripts/aarch64-trace.py scripts/test-native-close-range-gap.py $(GINUX_ARM64) $(ARM64_LAUNCH)/native-fixture
+	python3 scripts/aarch64-trace.py scripts/test-native-network-snapshot.py $(GINUX_ARM64) $(ARM64_LAUNCH)/native-fixture
+	python3 scripts/aarch64-trace.py scripts/test-native-unix-send-snapshot.py $(GINUX_ARM64) $(ARM64_LAUNCH)/native-fixture
 
 test-launch-arm64:
 	python3 scripts/test-launch.py $(GINUX_ARM64) $(ARM64_LAUNCH)/launch-fixture

@@ -110,5 +110,10 @@ jobs:
       - run: GINUX_AARCH64_KERNEL="$RUNNER_TEMP/Image" make native-aarch64-guest
       # Upstream's integration test scripts, directly on the arm64 runner:
       # launch, native supervision, gate 1 setup, tracee kill, process native.
+      # test-process-native runs unprivileged, as it does in the x86_64 job.
       - run: make build-fixtures-arm64
-      - run: sudo make test-integration-arm64
+      - run: sudo make test-launch-arm64
+      - run: sudo make test-native-supervision-arm64
+      - run: make test-process-native-arm64
+      - run: sudo make test-gate1-setup-arm64
+      - run: sudo make test-tracee-kill-arm64

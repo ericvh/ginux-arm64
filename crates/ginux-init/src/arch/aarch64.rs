@@ -522,17 +522,29 @@ fn read_raw(pid: usize) -> Option<UserPtRegs> {
     Some(raw)
 }
 
-fn write_raw(pid: usize, raw: &UserPtRegs) -> bool {
+/// Write the general registers. `logical` is the address of the x86-64
+/// register file they were translated from, or zero when there is none.
+///
+/// `ptrace` takes four arguments and the kernel ignores a fifth. The logical
+/// file rides there so that a tracer of this daemon can read what the
+/// supervisor staged, as it reads the argument of `PTRACE_SETREGS` on
+/// x86-64. `scripts/aarch64-trace.py` does, for upstream's race tests.
+/// Nothing in the daemon or the kernel acts on it.
+fn write_raw(pid: usize, raw: &UserPtRegs, logical: usize) -> bool {
     let mut iovec = IoVec {
         base: raw as *const _ as usize,
         len: core::mem::size_of::<UserPtRegs>(),
     };
-    ptrace(
-        PTRACE_SETREGSET,
-        pid,
-        NT_PRSTATUS,
-        &mut iovec as *mut _ as usize,
-    ) >= 0
+    unsafe {
+        syscall5(
+            SYS_PTRACE,
+            PTRACE_SETREGSET,
+            pid,
+            NT_PRSTATUS,
+            &mut iovec as *mut _ as usize,
+            logical,
+        ) >= 0
+    }
 }
 
 fn read_syscallno(pid: usize, raw: &UserPtRegs) -> i64 {
@@ -653,7 +665,7 @@ fn restore_restarted_argument(pid: usize, raw: &mut UserPtRegs, nr: u64, args: &
     }
     let dispatched = raw.regs[0];
     raw.regs[0] = wanted[0];
-    if write_raw(pid, raw) {
+    if write_raw(pid, raw, 0) {
         args[0] = record.restart_args[0];
     } else {
         raw.regs[0] = dispatched;
@@ -837,7 +849,7 @@ pub fn write_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
         raw.pstate = logical.eflags;
     }
     let current = read_syscallno(pid, &raw);
-    if !write_raw(pid, &raw) {
+    if !write_raw(pid, &raw, data) {
         return -1;
     }
     // A replay re-enters the kernel through `svc`, which sets the number

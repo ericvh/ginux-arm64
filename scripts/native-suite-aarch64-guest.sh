@@ -71,7 +71,7 @@ done
 for directory in "$launch" "$gate1" "$process"; do
     if [ -d "$directory" ]; then cp -R "$directory" "$share/.artifacts/"; fi
 done
-cp scripts/test-*.py "$share/scripts/"
+cp scripts/test-*.py scripts/aarch64-trace.py "$share/scripts/"
 cp config/*.toml "$share/config/"
 
 tar -xf "$rootfs" -C "$tree" --no-same-owner --exclude='dev/*' 2>/dev/null || {
