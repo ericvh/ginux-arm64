@@ -262,6 +262,14 @@ argument, and has no separate `orig_rax`. The translation therefore:
   Kernels before the tracer's `x0` became authoritative for the restart
   already pass the caller's own value, and nothing is changed there.
 
+The registers read at a stop are kept until the tracee can run again, so a
+write does not read them a second time: the daemon's `ptrace` wrapper tells
+the architecture layer about every request, and any request but a read or
+write of a stopped tracee forgets them. The syscall number comes with the
+stop kind (`PTRACE_GET_SYSCALL_INFO`) at an entry, and from the entry's
+record at an exit. A call with both stops costs six `ptrace` requests, where
+x86-64 spends four.
+
 Three argument encodings differ between the ABIs and are converted in both
 directions: `clone` takes `tls` before `child_tid`; `O_DIRECTORY`,
 `O_NOFOLLOW`, `O_DIRECT`, and `O_LARGEFILE` have different bit positions
@@ -280,6 +288,7 @@ supervisor as the call an x86-64 C library issues for the same function:
 | `faccessat(dir, path, mode)` | `faccessat2(dir, path, mode, 0)` |
 | `fchmodat(AT_FDCWD, path, mode)` | `chmod(path, mode)` |
 | `fchmodat(dir, path, mode)` | `fchmodat2(dir, path, mode, 0)` |
+| `readlinkat(AT_FDCWD, path, buffer, size)` | `readlink(path, buffer, size)` |
 | `getpgid(0)` | `getpgrp()` |
 
 When the supervisor leaves the call as shown, the kernel runs the tracee's
@@ -316,49 +325,79 @@ x86-64 (see the tests below).
 
 ## Verified
 
-Run on an x86_64 host with QEMU 10.2 and the v9fs `kernel-v7.4-rc1` arm64
-image, on upstream `85d53265` (pull request #334):
+On upstream `85d53265` (pull request #334).
 
-- `make check` and `make check-arm64` pass; `make test-unit` passes.
-- `make arch-smoke`, `make arch-smoke-arm64`, `make gate1-aarch64-guest`, and
-  `make native-aarch64-guest` pass.
-- `make native-suite-aarch64-guest` passes: all 42 checks of
-  `test-native-supervision.py`, in an Alpine 3 arm64 userland with Python
-  3.13. The same 42 pass directly on GitHub's `ubuntu-24.04-arm` runner in
-  the `aarch64` CI job.
-- `make test-arm64` passes on Rocky Linux 10.2 aarch64 (kernel 6.12) under
-  `qemu-system-aarch64`: `test-image` 8/8, then `test-intercept`,
-  `test-runtime`, `test-config`, `test-instance`, `test-gate12-cli`,
-  `test-devices`, `test-process`, and `test-kernel-views`.
-- The upstream x86_64 integration suite is unchanged in result:
-  `test-launch`, `test-native-supervision` (all eight scripts),
-  `test-process-native`, `test-gate1-setup`, and `test-tracee-kill` pass.
+Directly on GitHub's `ubuntu-24.04-arm` runner, in the `aarch64` CI job:
+
+- `make check-arm64`, the arch smoke test, the legacy-kernel boot, and the
+  two guest tests.
+- `test-launch` (68 checks; the x86_64 run has 69, the extra one being
+  `int80`), all eight `test-native-supervision` scripts (57 checks),
+  `test-gate1-setup` (3), `test-tracee-kill` (5), and `test-process-native`
+  (48). These are the counts of the x86_64 job.
+- `make test-unit` (every unit test of the workspace, built for and run on
+  the arm64 host), `test-allocator`, and `test-allocator-linux` (the
+  allocator library preloaded into its conformance and benchmark programs).
+
+On an x86_64 machine, in the Rocky Linux 10.2 aarch64 guest (kernel 6.12)
+under `qemu-system-aarch64`:
+
+- `make test-arm64`: `test-image` 8/8; `test-intercept`, `test-runtime`,
+  `test-config`, `test-instance`, `test-gate12-cli`, `test-devices`,
+  `test-process`, `test-kernel-views`; then the twelve integration scripts
+  above as root.
+- `make test-instances-arm64`: `test-vfs`, `test-native-vfs`,
+  `test-contract-runtime`, `test-gate125-lock`, `test-gate975-hooks`,
+  `test-gate975-network`, `test-systemd` (cold, warm, and repeat boots to a
+  login, the dnf-failure case, the startup-failure case, shutdown), and
+  `test-multi-instance`.
+
+In the minimal guest with the v9fs `kernel-v7.4-rc1` image:
+`gate1-aarch64-guest`, `native-aarch64-guest`, and
+`integration-aarch64-guest`.
+
+The x86_64 side is unchanged in result: `make check`, `make test-unit` (174
+tests), the five integration tests, the Rocky x86_64 host suite, and a
+systemd instance on the Rocky x86_64 host all pass with the shared-code
+changes. The x86_64 C fixtures compile to the same binaries as upstream's.
 
 ## Known gaps
 
-The aarch64 daemon is a port of the mechanism, not a validated product
-target. What is not covered:
+What still separates the aarch64 daemon from the x86_64 one:
 
-- **Structures in tracee memory.** Only `struct stat` is converted. A
-  supervisor path that reads or writes another structure whose layout differs
-  between the ABIs would be wrong on aarch64. `struct epoll_event` (packed on
-  x86-64 only) and the `open_how` flags of `openat2` are known examples; the
-  supervisor does not touch either today.
-- **`fcntl(F_GETFL)` results** are not converted. A passed-through result is
-  correct; a synthesized one would carry x86-64 flag bits.
-- **x86-64-only syscalls** (`open`, `stat`, `pipe`, `dup2`, `fork`, and the
-  rest) have no aarch64 number. A supervisor path that rewrites a call into
-  one of them is skipped on aarch64 and fails closed.
-- **Launch's vDSO list** names the x86-64 vDSO entries. aarch64 has no vDSO
-  `time` or `getcpu`.
-- **Coverage.** Of upstream's eight native-supervision scripts, the main one
-  runs on aarch64. The other seven (`test-native-yield-broker.py`, the two
-  clone scripts, the two `close_range` scripts, and the two send-snapshot
-  scripts) trace the daemon itself and decode its registers as x86-64
-  `user_regs_struct`; they are not ported. `test-launch`, the review
-  scenarios of `test-process-native`, systemd instances, OCI images, and the
-  allocator have not been run on aarch64.
-- `make gate1-x86_64-guest` was not run in this pass.
+- **Upstream does not support it.** The approved target is x86-64. Nothing
+  here has been reviewed by upstream or accepted by a human reviewer.
+- **Hardware.** Only the integration tests have run on arm64 hardware (the
+  CI runner). The Rocky host suite and every instance test, systemd
+  included, have run only under emulation on an x86_64 machine.
+- **Speed.** Not measured on hardware. Under emulation a systemd instance
+  reached its login in about 95 seconds on the aarch64 host and 28 on the
+  x86_64 one; the two emulations are not comparable, so this says little.
+  The aarch64 register translation spends six `ptrace` requests on a call
+  with both stops, x86-64 four.
+- **Not run on aarch64:** the benchmarks, `test-allocator-rocky`,
+  `test-systemd-live` (needs outside network from the guest),
+  `test-systemd-interactive`, `test-gate19-native-examples`, and `run-host`.
+  All but the first need the RPM.
+- **Recipes name amd64 images.** `config/examples/*.toml` and the instance
+  configs name their root by the amd64 manifest. A recipe that pulls its own
+  image on an aarch64 host has to name the arm64 manifest or the index.
+- **Checks that cannot be the same.** `int80` does not exist. The `kill`
+  and `pidfd_open` selector checks pass by construction (see the
+  integration tests). `test-runtime` and `test-instance` interpret the
+  x86-64 runtime fixture on either host; the aarch64 interpreter is covered
+  by `ginux-runtime`'s unit tests only.
+- **Contract names.** `access()`, `chmod()`, `readlink()` and `getpgrp()`
+  reach the contract under the names in "Calls shown in their x86-64 form".
+  A rule that names `syscall.access` matches nothing an aarch64 C library
+  issues, as a rule that names `syscall.faccessat` would not on x86-64.
+- **Structures.** `struct stat` is the only structure the supervisor reads
+  or writes in a tracee's memory whose layout differs between the ABIs, and
+  it is converted. A future supervisor path that touched `struct
+  epoll_event` (packed on x86-64 only) or the flags in `open_how` would
+  need the same.
+- **The minimal guest** cannot run `test-launch`, `test-tracee-kill`, or
+  the daemon-tracing scripts; the Rocky guest and the CI runner do.
 
 ## Bare-metal kernel
 

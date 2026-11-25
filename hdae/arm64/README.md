@@ -39,9 +39,10 @@ say an isolation unit is a "domain" they predate upstream's rename to
 | `gates/A5-linux-svc.md` | 19 | AArch64 Linux syscall table on the UEFI boot |
 | `gates/A6-native-supervision-suite.md` | none | Upstream's native-supervision suite on aarch64 |
 | `gates/A7-rocky-host-suite.md` | none | Review of the fifteen original branches; upstream's host suite on Rocky 10 aarch64 |
+| `gates/A8-parity-with-x86_64.md` | none | Upstream's integration and instance tests on aarch64, and the faults they found |
 
-A6 and A7 were written on `arm64/main`, after the rebase below. None of the
-seven was accepted by a human reviewer. They stay open.
+A6, A7 and A8 were written on `arm64/main`, after the rebase below. None of
+the eight was accepted by a human reviewer. They stay open.
 
 ## Rebase onto current upstream (2026-11-25)
 
@@ -84,10 +85,6 @@ rebased under it.
 
 ## Next gate, if the track continues
 
-Seven of upstream's native-supervision scripts trace the daemon itself and
-read its registers as x86-64 `user_regs_struct`: the yield broker, the two
-clone scripts, the two `close_range` scripts, and the two send-snapshot
-scripts. They need one shared reader of the daemon's own ptrace calls for
-each architecture. On aarch64 the daemon stages a tracee's registers with
-`PTRACE_SETREGSET`, not `PTRACE_SETREGS`. Porting them would put the replay
-races under test on aarch64, which the main suite does not reach.
+What A8 left is in the "Known gaps" of `docs/arm64/README.md`. The items
+that need a machine this track has not had: the instance tests and a
+benchmark on arm64 hardware, and an aarch64 RPM built and installed there.
