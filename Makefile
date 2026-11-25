@@ -491,7 +491,7 @@ ARM64_LAUNCH := .artifacts/launch-arm64
 ARM64_FIXTURE_BASE_CFLAGS := -nostdlib -static -fno-stack-protector -fno-builtin -O2 -mno-outline-atomics -I$(ARM64_LAUNCH)
 ARM64_FIXTURE_CFLAGS := $(ARM64_FIXTURE_BASE_CFLAGS) -Wall -Wextra -Werror
 
-.PHONY: build-arm64 check-arm64 arch-smoke arch-smoke-arm64 gate1-aarch64-guest gate1-x86_64-guest native-aarch64-guest legacy-kernel-aarch64 uefi-aarch64-guest build-launch-fixture-arm64 build-gate1-fixture-arm64 build-process-fixtures-arm64 build-fixtures-arm64 test-native-supervision-arm64 test-launch-arm64 test-gate1-setup-arm64 test-tracee-kill-arm64 test-process-native-arm64 test-integration-arm64 native-suite-aarch64-guest integration-aarch64-guest build-arm64-host-suite host-image-fetch-arm64 test-arm64
+.PHONY: build-arm64 check-arm64 arch-smoke arch-smoke-arm64 gate1-aarch64-guest gate1-x86_64-guest native-aarch64-guest legacy-kernel-aarch64 uefi-aarch64-guest build-launch-fixture-arm64 build-gate1-fixture-arm64 build-process-fixtures-arm64 build-fixtures-arm64 test-native-supervision-arm64 test-launch-arm64 test-gate1-setup-arm64 test-tracee-kill-arm64 test-process-native-arm64 test-integration-arm64 native-suite-aarch64-guest integration-aarch64-guest build-arm64-host-suite host-image-fetch-arm64 test-arm64 instance-images-arm64 test-instances-arm64
 
 build-arm64:
 	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo build -p ginux-init --target $(ARM64_TARGET) --release
@@ -606,6 +606,30 @@ host-image-fetch-arm64:
 test-arm64: build-arm64-host-suite build-fixtures-arm64
 	@ROCKY_ARCH=aarch64 ./scripts/test-rocky-instance.sh
 	@ROCKY_ARCH=aarch64 ./scripts/with-rocky-host.sh sh -c './scripts/test-host-suite.sh && ./scripts/test-integration-host.sh'
+
+# Upstream's instance tests on the Rocky aarch64 host: the VFS, contract
+# enforcement, the contract lock, hooks, shared networking, systemd in an
+# instance, and two systemd instances at once. They are upstream's scripts
+# and upstream's images, the arm64 manifests of the same pinned indexes.
+# The host is emulated, so the login driver's short limits are stretched.
+ARM64_INSTANCE_TESTS := vfs native-vfs contract-runtime gate125-lock gate975-hooks gate975-network systemd
+GINUX_EXPECT_TIME_SCALE ?= 10
+
+instance-images-arm64:
+	@ROCKY_ARCH=aarch64 ./scripts/fetch-rocky-oci.sh
+	@ROCKY_ARCH=aarch64 ./scripts/prepare-rocky-oci.sh
+	@ROCKY_ARCH=aarch64 GINUX_OCI_CONFIG_FILE=./config/rocky-systemd-oci.env ./scripts/fetch-rocky-oci.sh
+	@ROCKY_ARCH=aarch64 GINUX_OCI_CONFIG_FILE=./config/rocky-systemd-oci.env ./scripts/prepare-rocky-oci.sh
+
+test-instances-arm64: build-arm64-host-suite instance-images-arm64
+	@ROCKY_ARCH=aarch64 ROCKY_NETWORK_RESTRICT=on GINUX_EXPECT_TIME_SCALE=$(GINUX_EXPECT_TIME_SCALE) \
+		./scripts/with-rocky-host.sh sh -ec 'for name in $(ARM64_INSTANCE_TESTS); do ./scripts/test-$$name.sh; done'
+	@ROCKY_ARCH=aarch64 ROCKY_NETWORK_RESTRICT=on GINUX_EXPECT_TIME_SCALE=$(GINUX_EXPECT_TIME_SCALE) \
+		ROCKY_SSH_PORT=22417 ROCKY_VCPUS=4 ROCKY_MEMORY_MIB=4096 \
+		ROCKY_PID_FILE=build/rocky-gate17-host-aarch64.pid \
+		ROCKY_SERIAL_LOG=build/rocky-gate17-host-aarch64-serial.log \
+		ROCKY_OVERLAY_DISK=build/rocky-gate17-host-aarch64-overlay.qcow2 \
+		./scripts/with-rocky-host.sh ./scripts/test-multi-instance.sh
 
 # The bare-metal kernel line is its own workspace under baremetal/.
 legacy-kernel-aarch64 uefi-aarch64-guest:

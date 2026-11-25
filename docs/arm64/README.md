@@ -39,59 +39,90 @@ v9fs test harness publishes these on its `kernel-v*` releases.
 
 | Target | What it proves |
 |--------|----------------|
-| `gate1-aarch64-guest` | The interception demonstration: emulated `getpid` 4242, mediated `write` not executed, `uname` denied, `GATE1: PASS`. |
+| `gate1-aarch64-guest` | The interception demonstration under `PTRACE_SYSEMU`: emulated `getpid` 4242, mediated `write` not executed, `uname` denied, `GATE1: PASS`. |
 | `native-aarch64-guest` | `ginux native` under the seccomp trace filter, with a fixture that reads its own registers: `clone` denied with `-38`, a tracee `brk #0` failing the instance, virtual tid and PI-futex results, a `clone3` snapshot in parent and child, and a `close_range` across the protected descriptors, each with `x8` preserved. |
 | `native-suite-aarch64-guest` | Upstream's `scripts/test-native-supervision.py`, unmodified, against the aarch64 daemon: 42 checks. |
+| `integration-aarch64-guest` | That script, `test-gate1-setup`, and `test-process-native` in the same guest. `TESTS=` names others. |
 | `gate1-x86_64-guest` | The x86_64 demonstration in a guest. Set `GINUX_X86_64_KERNEL` to a `bzImage`. |
 
-### Upstream's native-supervision suite
+### Upstream's integration tests
+
+`make test-launch`, `test-native-supervision`, `test-gate1-setup`,
+`test-tracee-kill`, and `test-process-native` are upstream's root-run
+integration tests. Each has an `-arm64` target that runs the same script
+against the aarch64 daemon and fixtures:
 
 ```sh
-make build-arm64 build-launch-fixture-arm64
+make build-arm64 build-fixtures-arm64
 
 # On an arm64 host:
-sudo make test-native-supervision-arm64
+sudo make test-launch-arm64 test-native-supervision-arm64 test-gate1-setup-arm64 test-tracee-kill-arm64
+make test-process-native-arm64
 
-# On any other host, in a guest:
+# On any other host, on the Rocky aarch64 guest (see the next section):
+ROCKY_ARCH=aarch64 ./scripts/with-rocky-host.sh ./scripts/test-integration-host.sh
+
+# Or the subset a minimal guest can run:
 export GINUX_AARCH64_ROOTFS=/path/to/arm64-rootfs.tar
-make native-suite-aarch64-guest
+make integration-aarch64-guest
 ```
 
-`build-launch-fixture-arm64` compiles `tests/fixtures/native-fixture.c`, the
-same source `build-launch-fixture` compiles for x86_64, with
-`aarch64-linux-gnu-gcc` (`ARM64_CC` overrides it; an arm64 host uses `cc`).
+As root a workload drops to an unprivileged identity that must be able to
+reach the fixtures, so `test-process-native-arm64` runs without root in a
+private checkout, as upstream's CI runs it.
 
-`GINUX_AARCH64_ROOTFS` is a tar archive of an arm64 root filesystem that has
-`/bin/sh` and `python3`. One way to make it:
+`build-fixtures-arm64` compiles upstream's C fixtures (`native-fixture.c`,
+`launch-fixture.c`, `gate1-setup-fixture.c`, `process-review-fixture.c`),
+the same sources the x86_64 targets compile, with `aarch64-linux-gnu-gcc`
+(`ARM64_CC` overrides it; an arm64 host uses `cc`). The x86_64 fixtures are
+unchanged: they compile to the same binaries as upstream's files.
 
-```sh
-docker pull --platform linux/arm64 python:3.13-alpine
-docker export "$(docker create --platform linux/arm64 python:3.13-alpine)" -o arm64-rootfs.tar
-```
+The scenarios name every call by its x86-64 number, as the contract does.
+`tests/fixtures/fixture-aarch64.h` issues each one the way an aarch64 C
+library would. A number that exists on both tables is looked up in a header
+generated from `crates/ginux-core/src/syscall_map.rs`. A call the aarch64
+table lacks becomes its modern form: `open` is `openat`, `pipe` is `pipe2`,
+`dup2` is `dup3`, `fork` is `clone`, `poll` is `ppoll`, `mkdir` is
+`mkdirat`.
 
-The guest script unpacks it into an initramfs, shares the daemon, the
-fixtures, and the test scripts over virtio-9p, and runs the scripts as root.
+What differs on aarch64, each for a reason in the architecture:
 
-The scenarios in the fixture name every call by its x86-64 number, as the
-contract does. `tests/fixtures/native-fixture-aarch64.h` issues each one the
-way an aarch64 C library would. A number that exists on both tables is
-looked up in a header generated from `crates/ginux-core/src/syscall_map.rs`.
-A call the aarch64 table lacks becomes its modern form: `open` is `openat`,
-`dup2` is `dup3`, `fork` is `clone`, `poll` is `ppoll`, `mkdir` is `mkdirat`.
-The x86_64 fixture is unchanged: it compiles to the same binary as
-upstream's file.
-
-Two scenarios differ on aarch64, both for reasons in the architecture:
-
-- `int80` has no counterpart. A 64-bit aarch64 task has one syscall ABI.
-  The scenario executes `brk #0` instead, and the check accepts the
-  unexpected-trap failure it also accepts from an x86-64 host without IA32
-  emulation.
+- `int80` has no counterpart: a 64-bit aarch64 task has one syscall ABI. In
+  `test-native-supervision` the scenario executes `brk #0` instead, and the
+  check accepts the unexpected-trap failure it also accepts from an x86-64
+  host without IA32 emulation. `test-launch` skips its `int80` case.
+- `test-launch`'s contract checks name `openat` where they name `open` on
+  x86-64, because the fixture can only issue `openat`.
 - `juggled-pids` checks that `kill` and `pidfd_open` leave the caller's pid
   in the first argument register. On aarch64 that register returns the
   result, so those two checks pass by construction. The `waitid` checks in
   `null-wait` and `zero-effects` use the second argument register and are
   real on both.
+- The seccomp filters that `gate1-setup-fixture.c` and
+  `test-process-native.py` install name the aarch64 architecture and the
+  aarch64 numbers of `ptrace` and `process_vm_writev`.
+
+Seven of the native-supervision scripts trace the daemon itself (the yield
+broker, the two `clone3` scripts, the two `close_range` scripts, the two
+send-snapshot scripts) and read what they find as x86-64.
+`scripts/aarch64-trace.py <script> <arguments>` runs one unmodified on
+aarch64 and supplies that view: `PTRACE_GETREGS` and `PTRACE_SETREGS` on the
+traced daemon, its staging call shown as the `PTRACE_SETREGS` it is on
+x86-64, `/proc/<pid>/syscall` with x86-64 numbers, and a call the kernel is
+about to restart shown as x86-64 shows it at the same stop. On another
+machine it only runs the script. `GINUX_TRACE_TIME_SCALE` multiplies a
+script's own time limit.
+
+The minimal guest (`GINUX_AARCH64_ROOTFS`, a tar of an arm64 root with
+`/bin/sh` and `python3`) cannot run `test-launch`, `test-tracee-kill`, or the
+seven tracing scripts: they need `/proc/<pid>/task/<tid>/children` and
+util-linux `setpriv`, which that kernel and BusyBox lack. One way to make
+the root filesystem:
+
+```sh
+docker pull --platform linux/arm64 python:3.13-alpine
+docker export "$(docker create --platform linux/arm64 python:3.13-alpine)" -o arm64-rootfs.tar
+```
 
 ### Upstream's host suite on Rocky Linux 10 aarch64
 
@@ -139,9 +170,45 @@ through `scripts/test-host-suite.sh`. One of them alone:
 ROCKY_ARCH=aarch64 ./scripts/with-rocky-host.sh ./scripts/test-host-suite.sh process
 ```
 
-Only those scripts take `ROCKY_ARCH`. The other Rocky-host targets (systemd,
-OCI, VFS, benchmarks, the RPM) still copy x86_64 binaries and are x86_64
-only.
+`make test-arm64` then runs the integration tests of the previous section
+as root on the same boot (`scripts/test-integration-host.sh`).
+
+### Instances on Rocky Linux 10 aarch64
+
+```sh
+make test-instances-arm64
+```
+
+This runs upstream's instance tests against the aarch64 daemon on that
+host: `test-vfs`, `test-native-vfs`, `test-contract-runtime`,
+`test-gate125-lock`, `test-gate975-hooks`, `test-gate975-network`,
+`test-systemd` (Rocky Linux 10 systemd booted to a login in an instance,
+three times, then the dnf-failure and startup-failure cases), and
+`test-multi-instance` (two systemd instances at once, on a second host).
+
+The instance images are upstream's: `scripts/oci-common.sh` reads
+`config/rocky-instance-oci-aarch64.env` and
+`config/rocky-systemd-oci-aarch64.env` beside upstream's files, which name
+the arm64 manifests of the same pinned image indexes.
+`make instance-images-arm64` fetches and prepares them.
+
+The host is emulated on every machine (`start-rocky-host.sh` uses TCG, as
+upstream's does), and an emulated aarch64 host is slower than an emulated
+x86_64 one: systemd reached its login in about 95 seconds here against 28.
+`GINUX_EXPECT_TIME_SCALE` (10 in this target) multiplies the login driver's
+50-second and 120-second limits. It is unset, and the limits are upstream's,
+in every x86_64 target.
+
+An instance config names its root by image manifest, and upstream's files
+name the amd64 ones. The daemon treats that as an identity and the tests
+stage the arm64 root filesystem themselves, so those files work unchanged.
+A recipe meant to pull its own image on an aarch64 host has to name the
+arm64 manifest or the index.
+
+The Rocky-host targets not covered are the RPM (`test-rpm`,
+`test-gate19-native-examples`, `run-host`), the allocator, the benchmarks,
+`test-systemd-live`, and `test-systemd-interactive`. They still copy or
+build x86_64 artifacts.
 
 The original branch for this (`cursor/arm64-rocky-guest-2b05`) made
 `make test` itself boot the aarch64 guest and copied the binaries from a
@@ -201,12 +268,51 @@ directions: `clone` takes `tls` before `child_tid`; `O_DIRECTORY`,
 (`openat`, `open_by_handle_at`, `pipe2`, `fcntl(F_SETFL)`); and a synthesized
 `struct stat` is laid out for the tracee's architecture.
 
+### Calls shown in their x86-64 form
+
+A few calls have no aarch64 number, and an aarch64 C library issues another
+call in their place that the contract does not catalog, or that the smaller
+balanced surface does not include. The translation shows each one to the
+supervisor as the call an x86-64 C library issues for the same function:
+
+| The tracee issues | The supervisor sees |
+|-------------------|---------------------|
+| `faccessat(dir, path, mode)` | `faccessat2(dir, path, mode, 0)` |
+| `fchmodat(AT_FDCWD, path, mode)` | `chmod(path, mode)` |
+| `fchmodat(dir, path, mode)` | `fchmodat2(dir, path, mode, 0)` |
+| `getpgid(0)` | `getpgrp()` |
+
+When the supervisor leaves the call as shown, the kernel runs the tracee's
+own call with its own registers. When it skips the call, the result goes to
+`x0` and the other registers are the tracee's. A contract rule and an audit
+record name the shown call: `access()` on aarch64 is `syscall.faccessat2`.
+
+Every other call an aarch64 C library issues in place of an x86-64-only one
+(`openat`, `newfstatat`, `mkdirat`, `unlinkat`, `renameat`, `readlinkat`,
+`fchownat`, `pipe2`, `dup3`, `ppoll`, `pselect6`, `epoll_pwait`, `clone`, and
+the rest) is cataloged under its own name and needs nothing.
+
 ### The interception demonstration
 
-arm64 Linux has no `PTRACE_SYSEMU`. With no arguments, the aarch64 daemon
-loads the managed payload into the Ginux runtime and decides each `svc #0`
-there; the host executes none of them. `ginux runtime` loads ELF64 for either
-machine. An aarch64 entry point must be 4-byte aligned.
+With no arguments the daemon runs the managed payload as a tracee under
+`PTRACE_SYSEMU` and answers each stopped call, on both architectures. arm64
+Linux has had `PTRACE_SYSEMU` since 5.3. The kernel runs nothing at such a
+stop and the result is what the tracer leaves, which on aarch64 is `x0`, so
+the supervisor marks the call skipped before it writes the registers.
+
+`ginux runtime` interprets ELF64 for either machine. An aarch64 entry point
+must be 4-byte aligned.
+
+### What a tracer of the daemon sees
+
+Upstream's race tests ptrace the daemon and read the registers it stages for
+a tracee out of the argument of its `PTRACE_SETREGS`. On aarch64 the daemon
+stages with `PTRACE_SETREGSET`, and what it passes is `user_pt_regs`, already
+translated. So `write_user_regs` also passes the address of the x86-64
+register file it translated, as a fifth `ptrace` argument. The kernel takes
+four and ignores it; nothing in the daemon reads it back.
+`scripts/aarch64-trace.py` uses it to give those tests the view they have on
+x86-64 (see the tests below).
 
 ## Verified
 
