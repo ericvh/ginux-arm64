@@ -286,3 +286,10 @@ pub const VDSO_SYSCALLS: [u64; 5] = [96, 201, 228, 229, 309];
 /// register file is the kernel's own and nothing is kept between requests.
 #[inline(always)]
 pub fn before_ptrace(_request: usize, _pid: usize) {}
+
+/// Whether a tracee stopped by `SIGTRAP` executed a trap its compiler emits
+/// to abort. On x86-64 those are `ud2` and `hlt`, which raise `SIGILL` and
+/// `SIGSEGV`; `SIGTRAP` is `int3`, a breakpoint, and never this.
+pub fn abort_trap(_pid: usize) -> bool {
+    false
+}

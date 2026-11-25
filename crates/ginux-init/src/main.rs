@@ -6384,7 +6384,9 @@ fn supervise_native(
             }
             continue;
         }
-        if signal == 5 && !seccomp_entry {
+        // A trap the architecture's compilers emit to abort a process is the
+        // tracee's own fault signal and is delivered below like any other.
+        if signal == 5 && !seccomp_entry && !arch::abort_trap(host_pid) {
             native_fail(instance, pid, b"unexpected native trace stop");
         }
         if !seccomp_entry && signal != (5 | 0x80) {

@@ -1169,3 +1169,35 @@ pub fn emulated_result(regs: &mut UserRegs) {
 /// clock_gettime and clock_getres, by x86-64 number. `getcpu` is a real
 /// syscall here, and `time` does not exist.
 pub const VDSO_SYSCALLS: [u64; 3] = [96, 228, 229];
+
+/// Whether a tracee stopped by `SIGTRAP` executed a trap its compiler emits
+/// to abort.
+///
+/// aarch64 has one trap instruction, `brk`, and every form of it raises
+/// `SIGTRAP`. `brk #0` is the breakpoint a debugger plants, the counterpart
+/// of `int3`. The other immediates are how programs abort: GCC's
+/// `__builtin_trap` and glibc's `abort` are `brk #1000`, LLVM's trap is
+/// `brk #1`. On x86-64 the same sources become `ud2` or `hlt`, whose
+/// `SIGILL` or `SIGSEGV` the supervisor delivers to the tracee. So a `brk`
+/// with a nonzero immediate is delivered too, and only `brk #0` stays the
+/// unexpected trace stop that fails the instance.
+pub fn abort_trap(pid: usize) -> bool {
+    const PTRACE_PEEKTEXT: usize = 1;
+    const BRK_MASK: u64 = 0xffe0_001f;
+    const BRK: u64 = 0xd420_0000;
+    let Some(raw) = read_raw(pid) else {
+        return false;
+    };
+    let mut word = 0u64;
+    if ptrace(
+        PTRACE_PEEKTEXT,
+        pid,
+        raw.pc as usize,
+        &mut word as *mut _ as usize,
+    ) < 0
+    {
+        return false;
+    }
+    let instruction = word & 0xffff_ffff;
+    instruction & BRK_MASK == BRK && (instruction >> 5) & 0xffff != 0
+}
