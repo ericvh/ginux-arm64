@@ -3,7 +3,8 @@ name: check
 on:
   pull_request:
   push:
-    branches: [main]
+    # arm64/main is this fork's integration branch; main mirrors upstream.
+    branches: [main, arm64/main]
 
 permissions:
   contents: read
@@ -101,3 +102,6 @@ jobs:
         run: curl -fsSL -o "$RUNNER_TEMP/Image" https://github.com/v9fs/test/releases/download/kernel-v7.4-rc1/Image
       - run: GINUX_AARCH64_KERNEL="$RUNNER_TEMP/Image" make gate1-aarch64-guest
       - run: GINUX_AARCH64_KERNEL="$RUNNER_TEMP/Image" make native-aarch64-guest
+      # Upstream's native-supervision script, directly on the arm64 runner.
+      - run: make build-launch-fixture-arm64
+      - run: sudo make test-native-supervision-arm64

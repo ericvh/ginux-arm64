@@ -7,6 +7,12 @@ __attribute__((used, section(".ginux_clone_collision")))
 static const char occupied_snapshot_page[4096] = {0x5a};
 #endif
 
+#if defined(__aarch64__)
+#include "native-fixture-aarch64.h"
+#else
+#define spin_wait() __asm__ volatile("pause")
+#define breakpoint() __asm__ volatile("int3")
+
 static long call3(long number, word a, word b, word c)
 {
     long result;
@@ -48,6 +54,7 @@ static long call6(long number, word a, word b, word c, word d, word e, word f)
                      : "rcx", "r11", "memory");
     return result;
 }
+#endif
 
 static void print(const char *value)
 {
@@ -143,6 +150,7 @@ static void close_range_handler(int signal)
     close_range_handler_fd = call3(2, (word)"/scenario", 0, 0);
 }
 
+#if !defined(__aarch64__)
 void sigchld_restorer(void);
 __asm__(".global sigchld_restorer\n"
         "sigchld_restorer:\n"
@@ -212,6 +220,7 @@ __asm__(".global native_thread_call\n"
         "pop %r13\n"
         "pop %r12\n"
         "ret\n");
+#endif
 
 static volatile long descriptor_mutation_start;
 static volatile long descriptor_mutation_entered;
@@ -223,6 +232,7 @@ static volatile long descriptor_sibling_result = -1000;
 /* Two CLONE_FILES threads used to force a descriptor-table interleaving. The
  * first blocks in F_SETLKW while the host test owns the conflicting lock. The
  * second attempts dup only after the first entered its syscall. */
+#if !defined(__aarch64__)
 long native_gated_fcntl(word flags, word stack, const void *lock);
 __asm__(".global native_gated_fcntl\n"
         "native_gated_fcntl:\n"
@@ -276,6 +286,7 @@ __asm__(".global native_gated_dup\n"
         "ud2\n"
         "2: pop %r12\n"
         "ret\n");
+#endif
 
 static volatile long descriptor_gap_ready;
 static volatile long descriptor_gap_result = -1000;
@@ -284,6 +295,7 @@ static volatile long descriptor_gap_result = -1000;
  * its first trace stop, then calls dup2(source, target) once the byte at
  * *gate, a shared mapping of a file the host test writes, is set. It makes
  * no system call in between, so its dup2 is its next trace stop. */
+#if !defined(__aarch64__)
 long native_gap_dup2(word flags, word stack, const volatile char *gate, word source,
                      word target);
 __asm__(".global native_gap_dup2\n"
@@ -318,6 +330,7 @@ __asm__(".global native_gap_dup2\n"
         "pop %r13\n"
         "pop %r12\n"
         "ret\n");
+#endif
 
 long native_fixture_main(const word *stack)
 {
@@ -361,7 +374,7 @@ long native_fixture_main(const word *stack)
          * after it unless supervision has lost track of entry and exit stops. */
         char buffer[6 * 65];
         print_result("GINUX_FIXTURE: uname-before=", call3(63, (word)buffer, 0, 0));
-        __asm__ volatile("int3");
+        breakpoint();
         print_result("GINUX_FIXTURE: uname-after=", call3(63, (word)buffer, 0, 0));
         return 0;
     }
@@ -382,8 +395,17 @@ long native_fixture_main(const word *stack)
         /* int 0x80 eax=2 is i386 fork; it must not be read as x86-64 open.
          * rsi = 0 makes it pass the x86-64 open flag check. */
         long pid;
+#if defined(__aarch64__)
+        /* A 64-bit aarch64 task has one syscall ABI and nothing like
+         * int 0x80 to select another. The scenario stops at a trap that is
+         * not a syscall instead, which must end the instance the same way a
+         * host without IA32 emulation does. */
+        breakpoint();
+        pid = call3(57, 0, 0, 0);
+#else
         __asm__ volatile("int $0x80" : "=a"(pid) : "a"(2L), "b"(0L), "c"(0L), "d"(0L), "S"(0L)
                          : "memory");
+#endif
         if (pid == 0) {
             print("GINUX_FIXTURE: unsupervised child ran\n");
             return 0;
@@ -875,7 +897,7 @@ long native_fixture_main(const word *stack)
              * userspace. No poll or other syscall can supply an exit stop
              * while the parent waits for the actual signal handler. */
             if (call3(1, start_fds[1], (word)"g", 1) != 1) return 85;
-            while (!sigchld_seen) __asm__ volatile("pause");
+            while (!sigchld_seen) spin_wait();
             print_result("GINUX_FIXTURE: sigchld-userspace=", sigchld_seen);
         }
         poll_fd.fd = fds[0];
@@ -1071,9 +1093,13 @@ long native_fixture_main(const word *stack)
             || call3(72, fd, 0, 301) != 301) return 83;
         word first = 3, last = 300, flags = high | 2 /* CLOSE_RANGE_UNSHARE */;
         long result;
+#if defined(__aarch64__)
+        result = call_kept(436, &first, &last, &flags, 0, 0);
+#else
         __asm__ volatile("syscall" : "=a"(result), "+D"(first), "+S"(last), "+d"(flags)
                          : "a"(436L)
                          : "rcx", "r11", "memory");
+#endif
         print_result("GINUX_FIXTURE: signal-close-range=", result);
         print_result("GINUX_FIXTURE: signal-close-range-arguments-kept=",
                      first == 3 && last == 300 && flags == (high | 2));
@@ -1165,11 +1191,16 @@ long native_fixture_main(const word *stack)
         call3(1, fds[1], (word)"g", 1);
         word selected = pid;
         long result;
+#if defined(__aarch64__)
+        word which = 1 /* P_PID */, information = 0;
+        result = call_kept(247, &which, &selected, &information, 0x01000004, 0);
+#else
         register word r10 __asm__("r10") = 0x01000004;
         register word r8 __asm__("r8") = 0;
         __asm__ volatile("syscall" : "=a"(result), "+S"(selected)
                          : "a"(247L), "D"(1L), "d"(0L), "r"(r10), "r"(r8)
                          : "rcx", "r11", "memory");
+#endif
         print_result("GINUX_FIXTURE: null-peek=", result);
         print_result("GINUX_FIXTURE: null-selector-preserved=", selected == (word)pid);
         print_result("GINUX_FIXTURE: null-after-peek=", call5(247, 1, pid, 0, 4, 0));
@@ -1207,15 +1238,23 @@ long native_fixture_main(const word *stack)
         int fds[2], status = 0;
         long self = call3(39, 0, 0, 0), result;
         word selected = self;
+#if defined(__aarch64__)
+        result = call_kept(62, &selected, &(word){0}, &(word){0}, 0, 0);
+#else
         __asm__ volatile("syscall" : "=a"(result), "+D"(selected)
                          : "a"(62L), "S"(0L)
                          : "rcx", "r11", "memory");
+#endif
         print_result("GINUX_FIXTURE: kill-self=", result);
         print_result("GINUX_FIXTURE: kill-selector-preserved=", selected == (word)self);
         selected = self;
+#if defined(__aarch64__)
+        result = call_kept(434, &selected, &(word){0}, &(word){0}, 0, 0);
+#else
         __asm__ volatile("syscall" : "=a"(result), "+D"(selected)
                          : "a"(434L), "S"(0L)
                          : "rcx", "r11", "memory");
+#endif
         print_result("GINUX_FIXTURE: pidfd-open-ok=", result >= 0);
         print_result("GINUX_FIXTURE: pidfd-selector-preserved=", selected == (word)self);
         if (call4(293, (word)fds, 0, 0, 0) < 0) return 82;
@@ -1286,11 +1325,16 @@ long native_fixture_main(const word *stack)
     case 'z': {
         word selected = 0xfeed000000000007UL;
         long result;
+#if defined(__aarch64__)
+        word which = 1 /* P_PID */, information = 0;
+        result = call_kept(247, &which, &selected, &information, 4, 0);
+#else
         register word r10 __asm__("r10") = 4;
         register word r8 __asm__("r8") = 0;
         __asm__ volatile("syscall" : "=a"(result), "+S"(selected)
                          : "a"(247L), "D"(1L), "d"(0L), "r"(r10), "r"(r8)
                          : "rcx", "r11", "memory");
+#endif
         print_result("GINUX_FIXTURE: denied-waitid=", result);
         print_result("GINUX_FIXTURE: denied-selector-preserved=", selected == 0xfeed000000000007UL);
         return 0;
@@ -1409,9 +1453,13 @@ long native_fixture_main(const word *stack)
          * flag, and keeps the rest. The open itself must give the kernel
          * descriptor the flag and leave the caller's arguments in place. */
         word path = (word)"/dev/console", flags = 1 | 0x80000 /* O_CLOEXEC */, mode = 0;
+#if defined(__aarch64__)
+        console = call_kept(2, &path, &flags, &mode, 0, 0);
+#else
         __asm__ volatile("syscall" : "=a"(console), "+D"(path), "+S"(flags), "+d"(mode)
                          : "a"(2L)
                          : "rcx", "r11", "memory");
+#endif
         print_result("GINUX_FIXTURE: console-cloexec=", call3(72, console, 1 /* F_GETFD */, 0));
         print_result("GINUX_FIXTURE: open-arguments-kept=",
                      path == (word)"/dev/console" && flags == (1 | 0x80000) && mode == 0);
@@ -1498,16 +1546,16 @@ long native_fixture_main(const word *stack)
         print_result("GINUX_FIXTURE: barrier-threads=", first > 0 && second > 0);
         print_result("GINUX_FIXTURE: barrier-start=", 1);
         descriptor_mutation_start = 1;
-        while (!descriptor_mutation_entered) __asm__ volatile("pause");
+        while (!descriptor_mutation_entered) spin_wait();
         /* Give the first thread time to reach the blocked host fcntl before
          * the sibling reaches its seccomp stop. */
-        for (volatile word spin = 0; spin < 1000000; ++spin) __asm__ volatile("pause");
+        for (volatile word spin = 0; spin < 1000000; ++spin) spin_wait();
         descriptor_sibling_start = 1;
-        while (!descriptor_sibling_entered) __asm__ volatile("pause");
-        for (volatile word spin = 0; spin < 10000000; ++spin) __asm__ volatile("pause");
+        while (!descriptor_sibling_entered) spin_wait();
+        for (volatile word spin = 0; spin < 10000000; ++spin) spin_wait();
         print_result("GINUX_FIXTURE: sibling-deferred=", descriptor_sibling_result == -1000);
         while (descriptor_mutation_result == -1000 || descriptor_sibling_result == -1000)
-            __asm__ volatile("pause");
+            spin_wait();
         print_result("GINUX_FIXTURE: mutation-result=", descriptor_mutation_result);
         print_result("GINUX_FIXTURE: sibling-console=",
                      tracked_as_console(descriptor_sibling_result));
@@ -1528,9 +1576,9 @@ long native_fixture_main(const word *stack)
             || call3(72, fd, 0, 301) != 301) return 83;
         if (native_gap_dup2(thread, stack + 16384, (const volatile char *)gate, 301, 260) <= 0)
             return 85;
-        while (!descriptor_gap_ready) __asm__ volatile("pause");
+        while (!descriptor_gap_ready) spin_wait();
         long result = call3(436, 3, 300, 0);
-        while (descriptor_gap_result == -1000) __asm__ volatile("pause");
+        while (descriptor_gap_result == -1000) spin_wait();
         print_result("GINUX_FIXTURE: gap-close-range=", result);
         print_result("GINUX_FIXTURE: gap-dup2=", descriptor_gap_result);
         print_result("GINUX_FIXTURE: gap-closed=",
@@ -1632,15 +1680,23 @@ long native_fixture_main(const word *stack)
          * kernel gets: 239-241 runs as 239-239, 240-241 as an empty range. */
         word first = 239, last = 241, flags = 0;
         long result;
+#if defined(__aarch64__)
+        result = call_kept(436, &first, &last, &flags, 0, 0);
+#else
         __asm__ volatile("syscall" : "=a"(result), "+D"(first), "+S"(last), "+d"(flags)
                          : "a"(436L)
                          : "rcx", "r11", "memory");
+#endif
         print_result("GINUX_FIXTURE: cut-range-arguments-kept=",
                      result == 0 && first == 239 && last == 241 && flags == 0);
         first = 240;
+#if defined(__aarch64__)
+        result = call_kept(436, &first, &last, &flags, 0, 0);
+#else
         __asm__ volatile("syscall" : "=a"(result), "+D"(first), "+S"(last), "+d"(flags)
                          : "a"(436L)
                          : "rcx", "r11", "memory");
+#endif
         print_result("GINUX_FIXTURE: protected-range-arguments-kept=",
                      result == 0 && first == 240 && last == 241 && flags == 0);
         /* 239-300 with CLOSE_RANGE_UNSHARE runs as 239-239 with it and
@@ -1649,9 +1705,13 @@ long native_fixture_main(const word *stack)
         first = 239;
         last = 300;
         flags = high | 2 /* CLOSE_RANGE_UNSHARE */;
+#if defined(__aarch64__)
+        result = call_kept(436, &first, &last, &flags, 0, 0);
+#else
         __asm__ volatile("syscall" : "=a"(result), "+D"(first), "+S"(last), "+d"(flags)
                          : "a"(436L)
                          : "rcx", "r11", "memory");
+#endif
         print_result("GINUX_FIXTURE: span-range-arguments-kept=",
                      result == 0 && first == 239 && last == 300 && flags == (high | 2)
                      && call3(72, 242, 1, 0) == -9 && call3(72, 250, 1, 0) == -9
@@ -1689,6 +1749,7 @@ long native_fixture_main(const word *stack)
     }
 }
 
+#if !defined(__aarch64__)
 __asm__(".global _start\n"
         "_start:\n"
         "mov %rsp, %rdi\n"
@@ -1697,3 +1758,4 @@ __asm__(".global _start\n"
         "mov %rax, %rdi\n"
         "mov $231, %rax\n"
         "syscall\n");
+#endif

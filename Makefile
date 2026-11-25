@@ -482,7 +482,12 @@ ARM64_TARGET := aarch64-unknown-linux-gnu
 GINUX_ARM64 := target/$(ARM64_TARGET)/release/ginux
 QEMU_AARCH64 ?= qemu-aarch64-static
 
-.PHONY: build-arm64 check-arm64 arch-smoke arch-smoke-arm64 gate1-aarch64-guest gate1-x86_64-guest native-aarch64-guest legacy-kernel-aarch64 uefi-aarch64-guest
+# The C compiler for aarch64 fixtures: the host's on an arm64 host.
+ARM64_CC ?= $(if $(filter aarch64,$(shell uname -m)),$(CC),aarch64-linux-gnu-gcc)
+ARM64_LAUNCH := .artifacts/launch-arm64
+ARM64_FIXTURE_CFLAGS := -nostdlib -static -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror -I$(ARM64_LAUNCH)
+
+.PHONY: build-arm64 check-arm64 arch-smoke arch-smoke-arm64 gate1-aarch64-guest gate1-x86_64-guest native-aarch64-guest legacy-kernel-aarch64 uefi-aarch64-guest build-launch-fixture-arm64 test-native-supervision-arm64 native-suite-aarch64-guest
 
 build-arm64:
 	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo build -p ginux-init --target $(ARM64_TARGET) --release
@@ -506,6 +511,24 @@ gate1-x86_64-guest: build
 
 native-aarch64-guest: build-arm64
 	@./scripts/native-aarch64-guest.sh
+
+# Upstream's native-supervision fixture, built for aarch64 from the same
+# source. Its x86-64 syscall numbers are mapped through a table generated
+# from crates/ginux-core.
+build-launch-fixture-arm64:
+	@mkdir -p $(ARM64_LAUNCH)
+	./scripts/aarch64-syscall-header.sh > $(ARM64_LAUNCH)/syscall-map-aarch64.h
+	$(ARM64_CC) $(ARM64_FIXTURE_CFLAGS) tests/fixtures/native-fixture.c -o $(ARM64_LAUNCH)/native-fixture
+	$(ARM64_CC) $(ARM64_FIXTURE_CFLAGS) -DCLONE_SNAPSHOT_COLLISION -Wl,--section-start=.ginux_clone_collision=0x600000000000 tests/fixtures/native-fixture.c -o $(ARM64_LAUNCH)/native-clone-collision-fixture
+
+# Upstream's test script against the aarch64 daemon. Run as root on an arm64
+# host, after build-arm64 and build-launch-fixture-arm64.
+test-native-supervision-arm64:
+	python3 scripts/test-native-supervision.py $(GINUX_ARM64) $(ARM64_LAUNCH)/native-fixture
+
+# The same script in an arm64 guest, for hosts of another architecture.
+native-suite-aarch64-guest: build-arm64 build-launch-fixture-arm64
+	@./scripts/native-suite-aarch64-guest.sh
 
 # The bare-metal kernel line is its own workspace under baremetal/.
 legacy-kernel-aarch64 uefi-aarch64-guest:
