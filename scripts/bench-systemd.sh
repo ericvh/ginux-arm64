@@ -80,7 +80,8 @@ test "$idle_rss" -gt 0
 test -n "$peak_tasks"
 
 {
-    printf '%s\n' 'GINUX_SYSTEMD_BENCH: environment=Rocky-10.2-x86_64 qemu=TCG vcpus=2 memory-mib=2048 network=restricted dnf=skipped'
+    printf 'GINUX_SYSTEMD_BENCH: environment=Rocky-10.2-%s qemu=%s vcpus=2 memory-mib=2048 network=restricted dnf=skipped\n' \
+        "${ROCKY_ARCH:-x86_64}" "$(printf '%s' "${ROCKY_ACCEL:-tcg}" | tr '[:lower:]' '[:upper:]')"
     printf 'GINUX_SYSTEMD_BENCH: boot-to-login-ms=%s\n' "$boot_ms"
     printf 'GINUX_SYSTEMD_BENCH: total-runtime-ms=%s\n' "$total_ms"
     printf 'GINUX_SYSTEMD_BENCH: peak-tree-rss-kib=%s\n' "$peak_rss"

@@ -1,4 +1,9 @@
 #!/usr/bin/expect -f
+# The virtual /proc/version names the daemon's architecture.
+set machine x86_64
+if {[info exists env(ROCKY_ARCH)]} {
+    set machine $env(ROCKY_ARCH)
+}
 
 if {![info exists env(ROCKY_SSH_PORT)]} {
     set env(ROCKY_SSH_PORT) 22409
@@ -302,7 +307,7 @@ expect {
     eof { puts stderr "instance exited after background completion"; exit 235 }
 }
 expect -re {\[root@ginux [^]]+\]# }
-send -- "test \"\$(uname -s)\" = Linux && test \"\$(uname -n)\" = ginux && test \"\$(uname -r)\" = 6.12.0-ginux-abi1 && test \"\$(uname -v)\" = 'Ginux userspace kernel 0.1.0' && grep -Fq 'Ginux userspace kernel 0.1.0 (Linux ABI personality 6.12.0-ginux-abi1; contract self-contained-v1; x86_64)' /proc/version && test \"\$(grep -c '^processor' /proc/cpuinfo)\" -eq 2 && grep -q '^model name' /proc/cpuinfo && printf 'GINUX_PROC_%s\\n' 'IDENTITY: PASS'\r"
+send -- "test \"\$(uname -s)\" = Linux && test \"\$(uname -n)\" = ginux && test \"\$(uname -r)\" = 6.12.0-ginux-abi1 && test \"\$(uname -v)\" = 'Ginux userspace kernel 0.1.0' && grep -Fq 'Ginux userspace kernel 0.1.0 (Linux ABI personality 6.12.0-ginux-abi1; contract self-contained-v1; $machine)' /proc/version && test \"\$(grep -c '^processor' /proc/cpuinfo)\" -eq 2 && grep -q '^model name' /proc/cpuinfo && printf 'GINUX_PROC_%s\\n' 'IDENTITY: PASS'\r"
 expect {
     -re {GINUX_PROC_IDENTITY: PASS} {}
     timeout { puts stderr "uname, proc version, or filtered CPU identity was incorrect"; exit 157 }

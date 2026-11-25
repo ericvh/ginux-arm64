@@ -4,13 +4,17 @@ set -eu
 . ./scripts/rocky-host-common.sh
 
 ./scripts/install-ginux-host.sh >/dev/null
+# Each recipe is staged naming the image this host runs.
+mkdir -p build/gate19
 for config in \
     config/examples/rocky10-agent-workspace.toml \
     config/examples/ubuntu24-network-service.toml \
     config/examples/rocky10-paranoid-shell.toml \
     config/examples/alpine3.22-native.toml
 do
-    rocky_scp "$config" "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/$(basename "$config")"
+    rocky_instance_config "$config" "build/gate19/$(basename "$config")"
+    rocky_scp "build/gate19/$(basename "$config")" \
+        "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/$(basename "$config")"
 done
 
 run_example() {
@@ -36,10 +40,13 @@ run_example agent-workspace rocky10-agent-workspace.toml \
     'Reached target multi-user.target - Multi-User System.' \
     "printf 'GINUX_GATE19_BOOT_OK:agent-workspace\\n'" \
     'kill -RTMIN+4 1; exit'
-run_example ubuntu-cms ubuntu24-network-service.toml \
-    'Reached target multi-user.target - Multi-User System.' \
-    "/usr/bin/python3 -c 'import urllib.request; assert b\"Blank CMS\" in urllib.request.urlopen(\"http://127.0.0.1:8080\").read()' && printf 'GINUX_GATE19_BOOT_OK:ubuntu-cms\\n'" \
-    'kill -RTMIN+4 1; exit'
+# docker.io/jrei/systemd-ubuntu is published for linux/amd64 only.
+if [ "$ROCKY_ARCH" = x86_64 ]; then
+    run_example ubuntu-cms ubuntu24-network-service.toml \
+        'Reached target multi-user.target - Multi-User System.' \
+        "/usr/bin/python3 -c 'import urllib.request; assert b\"Blank CMS\" in urllib.request.urlopen(\"http://127.0.0.1:8080\").read()' && printf 'GINUX_GATE19_BOOT_OK:ubuntu-cms\\n'" \
+        'kill -RTMIN+4 1; exit'
+fi
 run_example paranoid-shell rocky10-paranoid-shell.toml \
     'Reached target multi-user.target - Multi-User System.' \
     "printf 'GINUX_GATE19_BOOT_OK:paranoid-shell\\n'" \
