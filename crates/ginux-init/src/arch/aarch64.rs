@@ -50,6 +50,22 @@ extern "C" fn getauxval(_kind: usize) -> usize {
     0
 }
 
+/// A distribution's `compiler_builtins` can carry the C form of the routine
+/// behind those atomics, built with the stack protector; Rocky Linux 10's
+/// does. On aarch64 the protector reads its canary from this symbol and
+/// calls `__stack_chk_fail` when it has changed. A C library provides both
+/// and this daemon has none, so the link failed there. The routine is a
+/// constructor that nothing in a freestanding binary runs. Should it ever
+/// run and find its canary changed, the daemon ends.
+#[no_mangle]
+#[allow(non_upper_case_globals)]
+static __stack_chk_guard: usize = 0x2f6f_7c6e_0a8d_b541;
+
+#[no_mangle]
+extern "C" fn __stack_chk_fail() -> ! {
+    crate::supervisor::exit_process(134)
+}
+
 pub const SYS_READ_HOST: usize = 63;
 pub const SYS_WRITE_HOST: usize = 64;
 pub const SYS_CLOSE_HOST: usize = 57;
