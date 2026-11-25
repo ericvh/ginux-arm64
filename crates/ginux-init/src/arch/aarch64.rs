@@ -593,26 +593,33 @@ const SHOWN_AS_ISSUED: u8 = 0;
 const SHOWN_WITH_FLAGS: u8 = 1;
 /// Shown as the older form that has no directory descriptor.
 const SHOWN_WITHOUT_DIRECTORY: u8 = 2;
+/// Shown as the older form that takes no arguments.
+const SHOWN_WITHOUT_ARGUMENTS: u8 = 3;
 
 /// Name a call for the supervisor the way an x86-64 C library would have
 /// issued it, and return how it was changed.
 ///
-/// `access` and `chmod` have no numbers on aarch64. A C library issues
-/// `faccessat` and `fchmodat` for them, two calls that take no flags and
-/// that the contract does not catalog. On x86-64 the same library functions
-/// issue `access`, `chmod`, or the newer `faccessat2` and `fchmodat2`, and
-/// those are what the contract and the supervisor know. So:
+/// `access`, `chmod` and `getpgrp` have no numbers on aarch64. A C library
+/// issues `faccessat`, `fchmodat` and `getpgid(0)` for them. The first two
+/// take no flags and the contract does not catalog them; the third is not
+/// part of the smaller balanced surface. On x86-64 the same library
+/// functions issue `access`, `chmod`, `getpgrp`, or the newer `faccessat2`
+/// and `fchmodat2`, and those are what the contract and the supervisor
+/// know. So:
 ///
 /// - `faccessat(dir, path, mode)` is shown as `faccessat2` with no flags.
 /// - `fchmodat(AT_FDCWD, path, mode)` is shown as `chmod(path, mode)`.
 /// - `fchmodat(dir, path, mode)` is shown as `fchmodat2` with no flags.
+/// - `getpgid(0)` is shown as `getpgrp()`.
 ///
 /// The kernel still runs the call the tracee issued unless the supervisor
 /// changes it: [`write_user_regs`] maps an unchanged call back.
 fn show_call(native: i64, args: &mut [u64; 6]) -> (u64, u8) {
     const HOST_FACCESSAT: i64 = 48;
     const HOST_FCHMODAT: i64 = 53;
+    const HOST_GETPGID: i64 = 155;
     const X86_CHMOD: u64 = 90;
+    const X86_GETPGRP: u64 = 111;
     const X86_FACCESSAT2: u64 = 439;
     const X86_FCHMODAT2: u64 = 452;
     const AT_FDCWD: i32 = -100;
@@ -628,6 +635,10 @@ fn show_call(native: i64, args: &mut [u64; 6]) -> (u64, u8) {
         HOST_FCHMODAT => {
             args[3] = 0;
             (X86_FCHMODAT2, SHOWN_WITH_FLAGS)
+        }
+        HOST_GETPGID if args[0] as u32 == 0 => {
+            *args = [0; 6];
+            (X86_GETPGRP, SHOWN_WITHOUT_ARGUMENTS)
         }
         _ => (logical_number(native), SHOWN_AS_ISSUED),
     }
@@ -889,6 +900,17 @@ pub fn write_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
                     }
                     raw.regs[1] = logical.rdi;
                     raw.regs[2] = logical.rsi;
+                    raw.regs[3] = record.own[3];
+                    raw.regs[4] = record.own[4];
+                    raw.regs[5] = record.own[5];
+                    own_call = true;
+                }
+                SHOWN_WITHOUT_ARGUMENTS => {
+                    if phase == ENTRY_PHASE && !skip {
+                        raw.regs[0] = record.own[0];
+                    }
+                    raw.regs[1] = record.own[1];
+                    raw.regs[2] = record.own[2];
                     raw.regs[3] = record.own[3];
                     raw.regs[4] = record.own[4];
                     raw.regs[5] = record.own[5];

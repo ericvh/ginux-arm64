@@ -16,13 +16,17 @@ rocky_scp config/instance-gate5.toml \
 rocky_scp "$rootfs" \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux-oci-rootfs.tar"
 
-rocky_ssh "set -eu; sudo rm -rf /var/lib/ginux/instances/gate5; sudo mkdir -p '$instance_root'; sudo tar -xf /var/tmp/ginux-oci-rootfs.tar -C '$instance_root'; sudo chmod -R a-w /var/lib/ginux/instances/gate5; test -x '$instance_root/usr/bin/bash'; test -x '$instance_root/usr/lib64/ld-linux-x86-64.so.2'; sha256sum '$instance_root/usr/bin/bash'" > build/gate5-bash-before.sha256
+rocky_ssh "set -eu; sudo rm -rf /var/lib/ginux/instances/gate5; sudo mkdir -p '$instance_root'; sudo tar -xf /var/tmp/ginux-oci-rootfs.tar -C '$instance_root'; sudo chmod -R a-w /var/lib/ginux/instances/gate5; test -x '$instance_root/usr/bin/bash'; test -x '$instance_root/$ROCKY_LOADER'; sha256sum '$instance_root/usr/bin/bash'" > build/gate5-bash-before.sha256
 
 rocky_ssh "sudo /var/tmp/ginux native /var/tmp/gate5.toml '$instance_root'" > "$native_log" 2>&1
 grep -Fqx 'GINUX_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=self-contained-v1' "$native_log"
 grep -Fqx 'GINUX_NATIVE: tracee-uid=65534 tracee-gid=65534 root=oci-read-only' "$native_log"
 grep -Fqx 'GINUX_NATIVE_AUTHORITY: supervisor-uid=65534 supervisor-gid=65534 capabilities=none no-new-privileges=1 inherited-fds=bounded root=instance-only' "$native_log"
-grep -Fqx 'GINUX_NATIVE_SHELL: PASS' "$native_log"
+# The shell's stdout marker and the supervisor's stderr audit share the
+# attached console, and on a slower host the marker lands inside an audit
+# line. Assert the complete marker without requiring it to own the line, as
+# test-contract-runtime does.
+grep -Fq 'GINUX_NATIVE_SHELL: PASS' "$native_log"
 grep -Fqx 'GINUX_NATIVE: supervisor=attached dispatch=paranoid direct-safe-syscalls=0' "$native_log"
 grep -Fqx 'GINUX_NATIVE_CHECK: PASS' "$native_log"
 grep -Eq '^GINUX_NATIVE_AUDIT: sequence=[0-9]+ instance=gate5-demo .*phase=entry syscall=[0-9]+ action=(mediate|emulate|deny)' "$native_log"

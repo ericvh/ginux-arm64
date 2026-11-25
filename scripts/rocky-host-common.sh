@@ -3,8 +3,8 @@
 ROCKY_SSH_PORT=${ROCKY_SSH_PORT:-22222}
 ROCKY_SSH_USER=ginux
 ROCKY_KEY=build/cache/rocky/gate1_ed25519
-# The guest architecture selects the binaries the tests copy to the host and
-# the host's files here. x86_64 is upstream's host and keeps upstream's file
+# The guest architecture selects the binaries the tests copy to the host, the
+# dynamic loader they expect in a Rocky root, and the host's files here. x86_64 is upstream's host and keeps upstream's file
 # names. aarch64 is the fork's; see docs/arm64/README.md.
 ROCKY_ARCH=${ROCKY_ARCH:-x86_64}
 case $ROCKY_ARCH in
@@ -12,11 +12,13 @@ case $ROCKY_ARCH in
         rocky_host=rocky-host
         GINUX_RELEASE=target/x86_64-unknown-linux-gnu/release
         GINUX_CLI_RELEASE=target/x86_64-unknown-linux-musl/release
+        ROCKY_LOADER=usr/lib64/ld-linux-x86-64.so.2
         ;;
     aarch64)
         rocky_host=rocky-host-aarch64
         GINUX_RELEASE=target/aarch64-unknown-linux-gnu/release
         GINUX_CLI_RELEASE=target/aarch64-unknown-linux-musl/release
+        ROCKY_LOADER=usr/lib/ld-linux-aarch64.so.1
         ;;
     *)
         printf 'ROCKY_ARCH must be x86_64 or aarch64, not %s\n' "$ROCKY_ARCH" >&2

@@ -25,8 +25,12 @@ grep -Fqx "INDEX_SHA256=$second_index_sha" "$identity"
 printf '  [3/7] PASS  repeatable index=%s\n' "$second_index_sha"
 
 tar -xOf "$rootfs" usr/lib/os-release | grep -Fq 'Rocky Linux'
-tar -xOf "$rootfs" usr/bin/bash | file - | grep -Fq 'ELF 64-bit LSB pie executable, x86-64'
-printf '%s\n' '  [4/7] PASS  Rocky identity and x86-64 dynamic shell present'
+case ${ROCKY_ARCH:-x86_64} in
+    aarch64) machine='ARM aarch64' ;;
+    *) machine=x86-64 ;;
+esac
+tar -xOf "$rootfs" usr/bin/bash | file - | grep -Fq "ELF 64-bit LSB pie executable, $machine"
+printf '  [4/7] PASS  Rocky identity and %s dynamic shell present\n' "$machine"
 
 bad_cache=$GINUX_OCI_WORK_DIR/corrupt-cache
 rm -rf "$bad_cache"
