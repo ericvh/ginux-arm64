@@ -799,37 +799,6 @@ pub fn breakpoint_trap_word(word: usize) -> usize {
     (word & !0xffff_ffff) | 0xd420_0000
 }
 
-/// Step over a tracee's own `brk #0`.
-///
-/// The fork-parent breakpoint plants the same instruction and is restored by
-/// the caller when a child result is pending. A `brk` the tracee executes
-/// itself is a signal stop, not a syscall stop. Leaving the program counter
-/// on the instruction retraps; advancing one instruction keeps the following
-/// syscall on the supervised path.
-pub fn skip_software_breakpoint(pid: usize) -> bool {
-    let Some(mut raw) = read_raw(pid) else {
-        return false;
-    };
-    if raw.pc & 3 != 0 {
-        return false;
-    }
-    let mut word = 0usize;
-    if ptrace(
-        crate::supervisor::PTRACE_PEEKTEXT,
-        pid,
-        raw.pc as usize,
-        &mut word as *mut _ as usize,
-    ) < 0
-    {
-        return false;
-    }
-    if word as u32 != 0xd420_0000 {
-        return false;
-    }
-    raw.pc = raw.pc.wrapping_add(SYSCALL_INSN_LEN);
-    write_raw(pid, &raw)
-}
-
 /// Make the tracee execute `svc` again when it resumes.
 ///
 /// `resume` is the address after the syscall instruction, as every syscall

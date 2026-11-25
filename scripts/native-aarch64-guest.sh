@@ -147,21 +147,23 @@ if ! grep -q "ptrace-init: wait=" "$fork_log" || ! grep -q "status=0" "$fork_log
 fi
 rm -f "$fork_log"
 
+# A tracee's own `brk #0` is a trap that is not a syscall stop. The instance
+# fails closed there, as it does for `int3` on x86-64.
 trap_log=$(run_scenario trap)
 if ! grep -q "GINUX_FIXTURE: uname-before=-38" "$trap_log"; then
     echo "aarch64 native trap did not deny uname before the breakpoint" >&2
     exit 1
 fi
-if ! grep -q "GINUX_FIXTURE: uname-after=-38" "$trap_log"; then
-    echo "aarch64 native trap did not deny uname after the breakpoint" >&2
+if grep -q "GINUX_FIXTURE: uname-after" "$trap_log"; then
+    echo "aarch64 native trap ran past the breakpoint" >&2
     exit 1
 fi
-if grep -q "unexpected native trace stop" "$trap_log"; then
-    echo "aarch64 native trap stopped on brk before the second uname" >&2
+if ! grep -q "GINUX_INSTANCE: failed reason=unexpected native trace stop" "$trap_log"; then
+    echo "aarch64 native trap did not fail the instance" >&2
     exit 1
 fi
-if ! grep -q "status=0" "$trap_log"; then
-    echo "aarch64 native trap scenario did not exit 0" >&2
+if ! grep -q "status=256" "$trap_log"; then
+    echo "aarch64 native trap scenario did not exit 1" >&2
     exit 1
 fi
 rm -f "$trap_log"

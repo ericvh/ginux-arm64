@@ -6378,21 +6378,6 @@ fn supervise_native(
             continue;
         }
         if signal == 5 && !seccomp_entry {
-            // aarch64 only: a `brk #0` the tracee executes itself is stepped
-            // over. Every other unexpected trap fails closed, as on x86-64.
-            #[cfg(target_arch = "aarch64")]
-            if arch::skip_software_breakpoint(host_pid) {
-                tasks[task_index] = Some(task);
-                let request = if task.awaiting_exit {
-                    PTRACE_SYSCALL
-                } else {
-                    PTRACE_CONT
-                };
-                if ptrace(request, host_pid, 0, 0) < 0 {
-                    native_fail(instance, pid, b"native breakpoint resume failed");
-                }
-                continue;
-            }
             native_fail(instance, pid, b"unexpected native trace stop");
         }
         if !seccomp_entry && signal != (5 | 0x80) {
