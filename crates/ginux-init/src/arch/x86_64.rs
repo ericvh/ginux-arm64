@@ -298,3 +298,13 @@ pub fn abort_trap(_pid: usize) -> bool {
 /// kind of stop from the status where it is needed.
 #[inline(always)]
 pub fn after_wait(_pid: usize, _status: i32) {}
+
+/// Called once with the stack the kernel started the daemon on.
+#[inline(always)]
+pub fn at_start(_initial_stack: *const usize) {}
+
+/// The host kernel's page size in bytes. x86-64 Linux has one.
+#[inline(always)]
+pub fn page_size() -> u64 {
+    4096
+}

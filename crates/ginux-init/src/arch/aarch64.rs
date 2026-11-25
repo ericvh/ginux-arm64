@@ -1286,3 +1286,39 @@ pub fn abort_trap(pid: usize) -> bool {
     let instruction = word & 0xffff_ffff;
     instruction & BRK_MASK == BRK && (instruction >> 5) & 0xffff != 0
 }
+
+/// The host kernel's page size, as its auxiliary vector reported it. arm64
+/// kernels are built for 4K, 16K, or 64K pages.
+static mut PAGE_SIZE: u64 = 4096;
+
+/// Called once with the stack the kernel started the daemon on: the
+/// argument count, the arguments, the environment, then the auxiliary
+/// vector. Records the page size from it.
+pub fn at_start(initial_stack: *const usize) {
+    const AT_NULL: usize = 0;
+    const AT_PAGESZ: usize = 6;
+    unsafe {
+        let argc = *initial_stack;
+        // Past the arguments and their null, then past the environment's.
+        let mut cursor = initial_stack.add(1 + argc + 1);
+        while *cursor != 0 {
+            cursor = cursor.add(1);
+        }
+        cursor = cursor.add(1);
+        while *cursor != AT_NULL {
+            if *cursor == AT_PAGESZ {
+                let size = *cursor.add(1) as u64;
+                if size.is_power_of_two() && size >= 4096 {
+                    core::ptr::write(core::ptr::addr_of_mut!(PAGE_SIZE), size);
+                }
+                return;
+            }
+            cursor = cursor.add(2);
+        }
+    }
+}
+
+/// The host kernel's page size in bytes.
+pub fn page_size() -> u64 {
+    unsafe { core::ptr::read(core::ptr::addr_of!(PAGE_SIZE)) }
+}

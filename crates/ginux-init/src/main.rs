@@ -228,6 +228,7 @@ unsafe extern "C" fn memcmp(
 
 #[no_mangle]
 extern "C" fn rust_main(initial_stack: *const usize) -> ! {
+    arch::at_start(initial_stack);
     let argc = unsafe { *initial_stack };
     let argv = unsafe { initial_stack.add(1) };
     match parse_argv(argc, argv) {
@@ -4523,7 +4524,10 @@ fn native_proc_status(
     native_buffer_append_i64(
         output,
         &mut length,
-        sample.rss_pages.saturating_mul(4).max(0),
+        sample
+            .rss_pages
+            .saturating_mul((arch::page_size() / 1024) as i64)
+            .max(0),
     )?;
     native_buffer_append(output, &mut length, b" kB\n\n")?;
     Some(length)
@@ -4723,7 +4727,7 @@ fn native_virtual_kernel_read(
                     native_buffer_append_u64(
                         output,
                         &mut length,
-                        rss_pages.saturating_mul(4096),
+                        rss_pages.saturating_mul(arch::page_size()),
                     )?;
                     native_buffer_append(output, &mut length, b"\n")?;
                 }
@@ -4769,7 +4773,7 @@ fn native_virtual_kernel_read(
                 b"stat" => return native_proc_stat(view, &sample, output),
                 b"status" => return native_proc_status(view, &sample, output),
                 b"statm" => {
-                    let size_pages = sample.vsize / 4096;
+                    let size_pages = sample.vsize / arch::page_size();
                     let resident_pages = sample.rss_pages.max(0) as u64;
                     native_buffer_append_u64(output, &mut length, size_pages)?;
                     native_buffer_append(output, &mut length, b" ")?;
@@ -4916,7 +4920,8 @@ fn native_virtual_proc_global(
         }
         b"/proc/meminfo" => {
             let total = global[3].saturating_mul(1024);
-            let available = total.saturating_sub(rss_pages.saturating_mul(4));
+            let available =
+                total.saturating_sub(rss_pages.saturating_mul(arch::page_size() / 1024));
             for (label, value) in [
                 (b"MemTotal:       ".as_slice(), total),
                 (b"MemFree:        ".as_slice(), available),
