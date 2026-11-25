@@ -78,5 +78,8 @@ script expects the banner `ginux-legacy: aarch64 virt boot ok` from
 
 ## Notes
 
+- The UEFI memory map on current AAVMF builds has more descriptors than the
+  kernel's 64-entry range list. Adjacent descriptors that map the same way
+  are merged, which keeps the list well inside that bound.
 - `make fmt-check` checks formatting for both workspaces here. Nothing in
   this directory is covered by the root `make check`.

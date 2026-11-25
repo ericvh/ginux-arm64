@@ -132,6 +132,16 @@ pub(crate) fn firmware_ranges(
         if !(device || normal) || start == end {
             continue;
         }
+        // Firmware splits one span of RAM into many descriptors by
+        // allocation type. They map the same way, so a descriptor that
+        // continues the previous range extends it instead of taking a slot.
+        if ranges.count != 0 {
+            let last = &mut ranges.items[ranges.count - 1];
+            if last.end == start && last.device == device {
+                last.end = end;
+                continue;
+            }
+        }
         if ranges.count == ranges.items.len() {
             return None;
         }
