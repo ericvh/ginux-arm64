@@ -128,6 +128,7 @@ resolution fails in an instance on a dual-stack host.
 | The same, on a distribution kernel | Rocky 10.2 aarch64 guest, kernel 6.12 (`make test-arm64`), under KVM on the M1 and under emulation | the same counts; the main supervision script alone has 42 |
 | Upstream's Rocky host suite still passes | the same guest (`make test-arm64`), KVM and emulated | `test-image` 8/8, `test-intercept`, `test-runtime`, `test-config`, `test-instance`, `test-gate12-cli`, `test-devices`, `test-process`, `test-kernel-views` |
 | Upstream's instance tests pass | the same guest (`make test-instances-arm64`): under KVM on the M1 at upstream's time limits, and emulated with the login driver's limits stretched | `test-vfs`, `test-native-vfs`, `test-contract-runtime`, `test-gate125-lock`, `test-gate975-hooks`, `test-gate975-network`, `test-systemd`, `test-multi-instance` |
+| Upstream's sysbench baseline runs on aarch64 and shows the cost of supervision beside x86_64's | Rocky guests under KVM, 4 vCPUs, selective dispatch: aarch64 on the M1, x86_64 on the Threadripper | instance rate over native: cpu 0.99x to 1.07x (x86_64 0.99x to 1.02x), memory 1.00x to 1.15x (0.99x to 1.02x), threads 0.85x to 0.94x (0.91x to 1.02x), mutex too noisy on both to read |
 | A systemd instance boots in comparable time on both architectures | Rocky guests under KVM: aarch64 on an Apple M1, x86_64 on an AMD Threadripper 1950X | login after 3.3 s on aarch64; 3.4 s and 3.9 s on x86_64 |
 | The package builds and passes upstream's lifecycle test | Rocky 10.2 aarch64 guests, emulated (`ROCKY_ARCH=aarch64 make rpm`, `make test-rpm`) | `Rocky Linux RPM build: PASS`, rpmlint 0 errors; `rpm-test-guest: PASS`, `Rocky Linux RPM lifecycle: PASS` |
 | The package builds on arm64 hardware | Rocky 10.2 aarch64 guest under KVM on the M1 | built in 164 s; `test-rpm-metadata: PASS`; the lifecycle test fails at the step it fails at for the x86_64 package under KVM (see the defects) |
@@ -140,6 +141,8 @@ resolution fails in an instance on a dual-stack host.
 
 - The arm64 hardware is one Apple M1 and the CI runner. No 64K-page kernel
   has run any of this.
+- The benchmark is one short run per architecture on unlike machines. It
+  shows a supervised call costing more on aarch64; it does not size it.
 - `test-systemd-live` does not pass on either architecture in these guests;
   see the defects above.
 - The package lifecycle test passed in an emulated guest only; under KVM

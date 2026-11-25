@@ -402,6 +402,25 @@ On upstream `85d53265` (pull request #334).
   machine (AMD Threadripper 1950X) with the Rocky x86_64 guest under KVM it
   took 3.4 and 3.9 seconds. The machines differ, so this compares nothing
   finer than the order of magnitude.
+- Upstream's sysbench baseline (`bench-prepare`, then
+  `collect-gate11-baseline.sh`) ran on both, each in its Rocky guest under
+  KVM with 4 vCPUs, selective dispatch, one-second runs, three repetitions.
+  The figure is the instance's rate over the native rate on the same host,
+  as the range across the five vCPU and thread combinations:
+
+  | Workload | x86_64 (Threadripper 1950X) | aarch64 (Apple M1) |
+  |----------|-----------------------------|--------------------|
+  | cpu | 0.99x to 1.02x | 0.99x to 1.07x |
+  | memory | 0.99x to 1.02x | 1.00x to 1.15x |
+  | threads | 0.91x to 1.02x | 0.85x to 0.94x |
+  | mutex | 0.75x to 1.15x | 0.65x to 1.27x |
+
+  Compute-bound work is at native speed on both. `threads`, which is a
+  storm of contended locks and so of supervised calls, loses about five to
+  nine percent on x86_64 and six to fifteen on aarch64. `mutex` varied by
+  up to a quarter between repetitions on both and shows nothing. The runs
+  are short and the M1 mixes two kinds of core, so treat the third row as
+  a direction, not a measurement.
 
 **On GitHub's `ubuntu-24.04-arm` runner**, in the `aarch64` CI job: the
 same native list as above, and the two minimal-guest tests.
@@ -429,12 +448,13 @@ What still separates the aarch64 daemon from the x86_64 one:
   here has been reviewed by upstream or accepted by a human reviewer.
 - **One arm64 machine.** The hardware results are from one Apple M1 and the
   CI runner. No 64K-page kernel and no server-class arm64 CPU has run it.
-- **Speed.** One boot time on each architecture is all that was measured.
-  Upstream's benchmarks have not been run on aarch64; they need the package
-  and an x86_64 `sysbench` build that the guest setup names. The aarch64
-  register translation spends six `ptrace` requests on a call with both
-  stops, x86-64 four.
-- **Not run on aarch64:** the benchmarks, `test-allocator-rocky`,
+- **Speed.** A supervised call costs more on aarch64: the register
+  translation spends six `ptrace` requests on a call with both stops, where
+  x86-64 spends four, and upstream's `threads` benchmark shows it (see
+  "Verified"). One short run on one machine of each architecture is all
+  that was measured; `bench-systemd`, `bench-block`, `bench-network`, and
+  the dispatch-mode matrix have not been run on aarch64.
+- **Not run on aarch64:** `test-allocator-rocky`,
   `test-systemd-interactive` (its checks name `x86_64` in `/proc/version`),
   `test-gate19-native-examples`, and `run-host`.
 - **`test-systemd-live` fails on both architectures here.** See "Upstream
