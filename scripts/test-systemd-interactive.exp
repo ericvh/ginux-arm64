@@ -7,21 +7,24 @@ if {[info exists env(ROCKY_ARCH)]} {
     set machine $env(ROCKY_ARCH)
 }
 set cpu_identity "model name"
+set host rocky-test-host
 if {$machine eq "aarch64"} {
     set cpu_identity "CPU implementer"
+    # Neither architecture can boot the other's disk.
+    set host rocky-test-host-aarch64
 }
 
 if {![info exists env(ROCKY_SSH_PORT)]} {
     set env(ROCKY_SSH_PORT) 22409
 }
 if {![info exists env(ROCKY_PID_FILE)]} {
-    set env(ROCKY_PID_FILE) build/rocky-test-host.pid
+    set env(ROCKY_PID_FILE) build/$host.pid
 }
 if {![info exists env(ROCKY_SERIAL_LOG)]} {
-    set env(ROCKY_SERIAL_LOG) build/rocky-test-host-serial.log
+    set env(ROCKY_SERIAL_LOG) build/$host-serial.log
 }
 if {![info exists env(ROCKY_OVERLAY_DISK)]} {
-    set env(ROCKY_OVERLAY_DISK) build/rocky-test-host-overlay.qcow2
+    set env(ROCKY_OVERLAY_DISK) build/$host-overlay.qcow2
 }
 file delete -force $env(ROCKY_PID_FILE) $env(ROCKY_SERIAL_LOG) \
     $env(ROCKY_OVERLAY_DISK)
