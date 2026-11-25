@@ -15,11 +15,16 @@ if test "$(uname -s)" = Linux && test -r /etc/rocky-release; then
     rpmbuild --define "_topdir $topdir" --ba "$topdir/SPECS/ginux.spec"
 else
     rpm_ssh_port=${GINUX_RPM_SSH_PORT:-22426}
+    # An aarch64 build host has its own disk overlay.
+    case ${ROCKY_ARCH:-x86_64} in
+        x86_64) build_host=rocky-rpm-build ;;
+        *) build_host=rocky-rpm-build-$ROCKY_ARCH ;;
+    esac
     ROCKY_NETWORK_RESTRICT=off \
         ROCKY_SSH_PORT="$rpm_ssh_port" \
-        ROCKY_PID_FILE=build/rocky-rpm-build.pid \
-        ROCKY_SERIAL_LOG=build/rocky-rpm-build-serial.log \
-        ROCKY_OVERLAY_DISK=build/rocky-rpm-build-overlay.qcow2 \
+        ROCKY_PID_FILE=build/$build_host.pid \
+        ROCKY_SERIAL_LOG=build/$build_host-serial.log \
+        ROCKY_OVERLAY_DISK=build/$build_host-overlay.qcow2 \
         ROCKY_VCPUS=4 ROCKY_MEMORY_MIB=4096 \
         ./scripts/with-rocky-host.sh ./scripts/build-rpm-rocky.sh
 fi

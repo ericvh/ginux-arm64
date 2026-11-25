@@ -11,9 +11,10 @@ rocky_scp build/rpm/SPECS/ginux.spec \
 rocky_scp scripts/rpm-build-guest.sh \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/rpm-build-guest.sh"
 rocky_ssh 'chmod 0755 /var/tmp/rpm-build-guest.sh && /var/tmp/rpm-build-guest.sh'
-mkdir -p build/rpm/RPMS/x86_64 build/rpm/SRPMS
-rocky_scp "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux-rpmbuild/RPMS/x86_64/gin*" \
-    build/rpm/RPMS/x86_64/
+# RPM names the two architectures as ROCKY_ARCH does.
+mkdir -p "build/rpm/RPMS/$ROCKY_ARCH" build/rpm/SRPMS
+rocky_scp "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux-rpmbuild/RPMS/$ROCKY_ARCH/gin*" \
+    "build/rpm/RPMS/$ROCKY_ARCH/"
 rocky_scp "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux-rpmbuild/SRPMS/gin*" \
     build/rpm/SRPMS/
 printf '%s\n' 'Rocky Linux RPM build: PASS'

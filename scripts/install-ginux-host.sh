@@ -6,7 +6,7 @@ set -eu
 rpm_file=${GINUX_RPM_FILE:-}
 if test -z "$rpm_file"; then
     if test -d build/rpm/RPMS; then
-        rpm_file=$(find build/rpm/RPMS -type f -name 'ginux-*.x86_64.rpm' -print | LC_ALL=C sort | tail -n 1)
+        rpm_file=$(find build/rpm/RPMS -type f -name "ginux-*.$ROCKY_ARCH.rpm" -print | LC_ALL=C sort | tail -n 1)
     fi
 fi
 test -n "$rpm_file" && test -r "$rpm_file" || {

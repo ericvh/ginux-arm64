@@ -1,11 +1,12 @@
 #!/bin/sh
 set -eu
 
-rpm_file=$(find build/rpm/RPMS -type f -name 'ginux-*.x86_64.rpm' -print | sed -n '1p')
+rpm_arch=${ROCKY_ARCH:-x86_64}
+rpm_file=$(find build/rpm/RPMS -type f -name "ginux-*.$rpm_arch.rpm" -print | sed -n '1p')
 srpm_file=$(find build/rpm/SRPMS -type f -name 'ginux-*.src.rpm' -print | sed -n '1p')
 test -n "$rpm_file" && test -n "$srpm_file"
 test "$(rpm -qp --qf '%{NAME}\n' "$rpm_file")" = ginux
-test "$(rpm -qp --qf '%{ARCH}\n' "$rpm_file")" = x86_64
+test "$(rpm -qp --qf '%{ARCH}\n' "$rpm_file")" = "$rpm_arch"
 test "$(rpm -qp --qf '%{LICENSE}\n' "$rpm_file")" = Apache-2.0
 files=$(rpm -qpl "$rpm_file")
 printf '%s\n' "$files" | grep -Fxq /usr/bin/ginux

@@ -9,6 +9,16 @@ Source1:        %{name}-%{version}-vendor.tar.gz
 Source2:        ginux.tmpfiles
 Source3:        ginux.rpmlintrc
 
+# The runtime is a freestanding binary built for the package's own
+# architecture: x86_64, or aarch64 on the fork's port.
+%ifarch aarch64
+%global ginux_triple aarch64-unknown-linux-gnu
+%global ginux_triple_env AARCH64_UNKNOWN_LINUX_GNU
+%else
+%global ginux_triple x86_64-unknown-linux-gnu
+%global ginux_triple_env X86_64_UNKNOWN_LINUX_GNU
+%endif
+
 BuildRequires:  cargo
 BuildRequires:  rust >= 1.85
 BuildRequires:  rust-std-static
@@ -50,8 +60,8 @@ export CARGO_TARGET_DIR=%{cargo_target}
 RUSTFLAGS='' cargo build --offline --locked --release -p ginux-cli -p ginux-oci
 RUSTFLAGS='-C link-arg=-Wl,-z,relro -C link-arg=-Wl,-z,now' \
     cargo build --offline --locked --release -p ginux-allocator
-CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS='-C linker=clang -C link-arg=-nostdlib -C link-arg=-static -C link-arg=-no-pie -C relocation-model=static' \
-    cargo build --offline --locked --release -p ginux-init --target x86_64-unknown-linux-gnu
+CARGO_TARGET_%{ginux_triple_env}_RUSTFLAGS='-C linker=clang -C link-arg=-nostdlib -C link-arg=-static -C link-arg=-no-pie -C relocation-model=static' \
+    cargo build --offline --locked --release -p ginux-init --target %{ginux_triple}
 
 %check
 cc -O2 -Wall -Wextra -Werror -pthread \
@@ -64,7 +74,7 @@ install -D -m 0755 %{cargo_target}/release/ginux-cli %{buildroot}%{_bindir}/ginu
 install -D -m 0755 %{cargo_target}/release/ginux-oci %{buildroot}%{_libexecdir}/ginux/ginux-image
 install -D -m 0755 %{cargo_target}/release/libginux_allocator.so \
     %{buildroot}%{_libdir}/ginux/libginux_allocator.so
-install -D -m 0755 %{cargo_target}/x86_64-unknown-linux-gnu/release/ginux \
+install -D -m 0755 %{cargo_target}/%{ginux_triple}/release/ginux \
     %{buildroot}%{_libexecdir}/ginux/ginux-runtime
 install -D -m 0755 scripts/ginux-host-instance-helper.sh \
     %{buildroot}%{_libexecdir}/ginux/ginux-helper
