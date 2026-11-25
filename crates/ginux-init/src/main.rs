@@ -11533,9 +11533,9 @@ fn native_arguments_allowed(syscall: u64, registers: &UserRegs, mode: usize) -> 
             73 => registers.rdi < INSTANCE_NULL_FD as u64 && registers.rsi & !15 == 0,
             74 | 75 => registers.rdi < INSTANCE_NULL_FD as u64,
             77 => registers.rdi < INSTANCE_NULL_FD as u64,
-            98 => {
-                (registers.rdi <= 1 || registers.rdi == u64::from(u32::MAX)) && registers.rsi != 0
-            }
+            // `who` is an `int`, which the kernel reads from the low half of
+            // the register. A C library may or may not sign-extend its -1.
+            98 => matches!(registers.rdi as i32, -1..=1) && registers.rsi != 0,
             79 => registers.rdi != 0 && registers.rsi <= 4096,
             81 | 306 => registers.rdi < INSTANCE_NULL_FD as u64,
             280 => {
