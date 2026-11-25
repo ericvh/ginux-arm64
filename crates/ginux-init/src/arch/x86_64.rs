@@ -281,3 +281,8 @@ pub fn emulated_result(_regs: &mut UserRegs) {}
 /// The calls the x86-64 vDSO answers without a syscall: gettimeofday, time,
 /// clock_gettime, clock_getres and getcpu, by x86-64 number.
 pub const VDSO_SYSCALLS: [u64; 5] = [96, 201, 228, 229, 309];
+
+/// Called before every `ptrace` request the daemon makes. The x86-64
+/// register file is the kernel's own and nothing is kept between requests.
+#[inline(always)]
+pub fn before_ptrace(_request: usize, _pid: usize) {}

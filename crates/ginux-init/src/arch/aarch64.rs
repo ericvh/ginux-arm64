@@ -353,6 +353,7 @@ const X86_OPEN_BY_HANDLE_AT: u64 = 304;
 const F_SETFL: u64 = 4;
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 struct UserPtRegs {
     regs: [u64; 31],
     sp: u64,
@@ -394,6 +395,9 @@ struct SavedCall {
     restart_nr: u64,
     restart_args: [u64; 6],
     restart_x0: u64,
+    /// The kernel's own number for the call, as last read or written. The
+    /// kernel does not change it between a call's entry and exit stops.
+    native: i64,
     /// How the call the tracee issued is shown to the supervisor (see
     /// [`show_call`]), and the argument registers it issued it with, which
     /// are put back where the shown form has no place for them.
@@ -416,6 +420,7 @@ const EMPTY_CALL: SavedCall = SavedCall {
     restart_nr: 0,
     restart_args: [0; 6],
     restart_x0: 0,
+    native: -1,
     shown: SHOWN_AS_ISSUED,
     own: [0; 6],
 };
@@ -506,8 +511,12 @@ fn recall_call(pid: usize, pc: u64) -> Option<SavedCall> {
     (current.pc == pc).then_some(current)
 }
 
-/// Which kind of stop the tracee is in, from `PTRACE_GET_SYSCALL_INFO`.
-fn stop_kind(pid: usize) -> u8 {
+/// Which kind of stop the tracee is in, from `PTRACE_GET_SYSCALL_INFO`, and
+/// at an entry or seccomp stop the number of the call, which the same
+/// request reports.
+fn stop_kind(pid: usize) -> (u8, Option<i64>) {
+    // op, arch, instruction pointer, stack pointer, then nr and six
+    // arguments at an entry or seccomp stop.
     let mut info = [0u64; 11];
     let read = ptrace(
         PTRACE_GET_SYSCALL_INFO,
@@ -516,9 +525,90 @@ fn stop_kind(pid: usize) -> u8 {
         info.as_mut_ptr() as usize,
     );
     if read < 0 {
-        0
-    } else {
-        info[0] as u8
+        return (0, None);
+    }
+    let kind = info[0] as u8;
+    let number = matches!(kind, SYSCALL_INFO_ENTRY | SYSCALL_INFO_SECCOMP)
+        .then_some(i64::from(info[3] as i32));
+    (kind, number)
+}
+
+/// The registers of the one tracee whose stop was read last, as they are in
+/// the kernel now. A tracee's registers change only when it runs or when
+/// this module writes them, so until it is resumed a write can start from
+/// these and skip reading them again. [`before_ptrace`] forgets them when
+/// the supervisor issues any request that could let the tracee run.
+struct Stop {
+    pid: usize,
+    known: bool,
+    raw: UserPtRegs,
+    native: i64,
+}
+
+static mut STOP: Stop = Stop {
+    pid: 0,
+    known: false,
+    raw: UserPtRegs {
+        regs: [0; 31],
+        sp: 0,
+        pc: 0,
+        pstate: 0,
+    },
+    native: -1,
+};
+
+fn remember_stop(pid: usize, raw: &UserPtRegs, native: i64) {
+    unsafe {
+        core::ptr::write(
+            core::ptr::addr_of_mut!(STOP),
+            Stop {
+                pid,
+                known: true,
+                raw: *raw,
+                native,
+            },
+        );
+    }
+}
+
+fn known_stop(pid: usize) -> Option<(UserPtRegs, i64)> {
+    let stop = unsafe { &*core::ptr::addr_of!(STOP) };
+    (stop.known && stop.pid == pid).then_some((stop.raw, stop.native))
+}
+
+/// Called before every `ptrace` request the daemon makes. Requests that
+/// only read or write a stopped tracee leave what is known about its stop
+/// in place; every other request may resume it.
+pub fn before_ptrace(request: usize, pid: usize) {
+    const PTRACE_PEEKTEXT: usize = 1;
+    const PTRACE_PEEKDATA: usize = 2;
+    const PTRACE_POKETEXT: usize = 4;
+    const PTRACE_POKEDATA: usize = 5;
+    const PTRACE_SETOPTIONS: usize = 0x4200;
+    const PTRACE_GETEVENTMSG: usize = 0x4201;
+    const PTRACE_GETSIGINFO: usize = 0x4202;
+    const PTRACE_SETSIGINFO: usize = 0x4203;
+    if matches!(
+        request,
+        PTRACE_PEEKTEXT
+            | PTRACE_PEEKDATA
+            | PTRACE_POKETEXT
+            | PTRACE_POKEDATA
+            | PTRACE_SETOPTIONS
+            | PTRACE_GETEVENTMSG
+            | PTRACE_GETSIGINFO
+            | PTRACE_SETSIGINFO
+            | PTRACE_GETREGSET
+            | PTRACE_SETREGSET
+            | PTRACE_GET_SYSCALL_INFO
+    ) {
+        return;
+    }
+    unsafe {
+        let stop = &mut *core::ptr::addr_of_mut!(STOP);
+        if stop.pid == pid {
+            stop.known = false;
+        }
     }
 }
 
@@ -603,6 +693,10 @@ fn write_syscallno(pid: usize, number: i32) -> bool {
     ) >= 0
 }
 
+/// `readlink`, the one call shown without its directory that has a third
+/// argument.
+const X86_READLINK: u64 = 89;
+
 /// Shown under its own number, arguments in place.
 const SHOWN_AS_ISSUED: u8 = 0;
 /// Shown as the newer form that adds a flags argument, with no flags.
@@ -615,17 +709,19 @@ const SHOWN_WITHOUT_ARGUMENTS: u8 = 3;
 /// Name a call for the supervisor the way an x86-64 C library would have
 /// issued it, and return how it was changed.
 ///
-/// `access`, `chmod` and `getpgrp` have no numbers on aarch64. A C library
-/// issues `faccessat`, `fchmodat` and `getpgid(0)` for them. The first two
-/// take no flags and the contract does not catalog them; the third is not
-/// part of the smaller balanced surface. On x86-64 the same library
-/// functions issue `access`, `chmod`, `getpgrp`, or the newer `faccessat2`
-/// and `fchmodat2`, and those are what the contract and the supervisor
-/// know. So:
+/// `access`, `chmod`, `readlink` and `getpgrp` have no numbers on aarch64.
+/// A C library issues `faccessat`, `fchmodat`, `readlinkat` and `getpgid(0)`
+/// for them. The first two take no flags and the contract does not catalog
+/// them; the other two are not part of the smaller balanced surface. On
+/// x86-64 the same library functions issue `access`, `chmod`, `readlink`,
+/// `getpgrp`, or the newer `faccessat2` and `fchmodat2`, and those are what
+/// the contract and the supervisor know. So:
 ///
 /// - `faccessat(dir, path, mode)` is shown as `faccessat2` with no flags.
 /// - `fchmodat(AT_FDCWD, path, mode)` is shown as `chmod(path, mode)`.
 /// - `fchmodat(dir, path, mode)` is shown as `fchmodat2` with no flags.
+/// - `readlinkat(AT_FDCWD, path, buffer, size)` is shown as
+///   `readlink(path, buffer, size)`.
 /// - `getpgid(0)` is shown as `getpgrp()`.
 ///
 /// The kernel still runs the call the tracee issued unless the supervisor
@@ -634,6 +730,7 @@ fn show_call(native: i64, args: &mut [u64; 6]) -> (u64, u8) {
     const HOST_FACCESSAT: i64 = 48;
     const HOST_FCHMODAT: i64 = 53;
     const HOST_GETPGID: i64 = 155;
+    const HOST_READLINKAT: i64 = 78;
     const X86_CHMOD: u64 = 90;
     const X86_GETPGRP: u64 = 111;
     const X86_FACCESSAT2: u64 = 439;
@@ -651,6 +748,10 @@ fn show_call(native: i64, args: &mut [u64; 6]) -> (u64, u8) {
         HOST_FCHMODAT => {
             args[3] = 0;
             (X86_FCHMODAT2, SHOWN_WITH_FLAGS)
+        }
+        HOST_READLINKAT if args[0] as i32 == AT_FDCWD => {
+            *args = [args[1], args[2], args[3], 0, 0, 0];
+            (X86_READLINK, SHOWN_WITHOUT_DIRECTORY)
         }
         HOST_GETPGID if args[0] as u32 == 0 => {
             *args = [0; 6];
@@ -757,8 +858,19 @@ pub fn read_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
     let Some(mut raw) = read_raw(pid) else {
         return -1;
     };
-    let kind = stop_kind(pid);
-    let native = read_syscallno(pid, &raw);
+    let (kind, entered) = stop_kind(pid);
+    // The number comes with the stop kind at an entry, and from the entry's
+    // record at an exit. Only the other stops have to ask for it.
+    let recalled = if kind == SYSCALL_INFO_EXIT {
+        recall_call(pid, raw.pc)
+    } else {
+        None
+    };
+    let native = match (entered, recalled) {
+        (Some(number), _) => number,
+        (None, Some(saved)) => saved.native,
+        (None, None) => read_syscallno(pid, &raw),
+    };
     let mut args = [
         raw.regs[0],
         raw.regs[1],
@@ -770,7 +882,7 @@ pub fn read_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
     let mut nr = logical_number(native);
     let (rax, phase) = match kind {
         SYSCALL_INFO_EXIT => {
-            if let Some(saved) = recall_call(pid, raw.pc) {
+            if let Some(saved) = recalled {
                 nr = saved.nr;
                 args = saved.args;
             } else {
@@ -798,6 +910,7 @@ pub fn read_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
                 record.args = args;
                 record.issued = nr;
                 record.sent_x0 = raw.regs[0];
+                record.native = native;
                 core::ptr::write(slot, record);
             }
             (ENTRY_RAX, ENTRY_PHASE)
@@ -807,6 +920,7 @@ pub fn read_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
             (raw.regs[0], OTHER_PHASE)
         }
     };
+    remember_stop(pid, &raw, native);
     let logical = UserRegs {
         r15: 0,
         r14: 0,
@@ -858,8 +972,17 @@ pub fn read_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
 /// that ends the replay sequence gives it back.
 pub fn write_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
     let logical = unsafe { core::ptr::read_unaligned(data as *const UserRegs) };
-    let Some(mut raw) = read_raw(pid) else {
-        return -1;
+    // Start from the registers the read of this stop left, when it is still
+    // this tracee's stop; otherwise from the kernel's.
+    let (mut raw, current) = match known_stop(pid) {
+        Some(stop) => stop,
+        None => {
+            let Some(raw) = read_raw(pid) else {
+                return -1;
+            };
+            let current = read_syscallno(pid, &raw);
+            (raw, current)
+        }
     };
     let phase = logical.cs;
     let skip = logical.orig_rax == NO_SYSCALL;
@@ -911,12 +1034,20 @@ pub fn write_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
                     own_call = true;
                 }
                 SHOWN_WITHOUT_DIRECTORY => {
+                    // The shown arguments sit one register up in the
+                    // tracee's call, after the directory in `x0`. Every
+                    // register here was the tracee's own at the entry, and
+                    // the ones the shown form does not reach still are.
                     if phase == ENTRY_PHASE && !skip {
                         raw.regs[0] = record.own[0];
                     }
                     raw.regs[1] = logical.rdi;
                     raw.regs[2] = logical.rsi;
-                    raw.regs[3] = record.own[3];
+                    raw.regs[3] = if record.issued == X86_READLINK {
+                        logical.rdx
+                    } else {
+                        record.own[3]
+                    };
                     raw.regs[4] = record.own[4];
                     raw.regs[5] = record.own[5];
                     own_call = true;
@@ -971,13 +1102,13 @@ pub fn write_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
     if logical.eflags != 0 {
         raw.pstate = logical.eflags;
     }
-    let current = read_syscallno(pid, &raw);
     if !write_raw(pid, &raw, data) {
         return -1;
     }
     // A replay re-enters the kernel through `svc`, which sets the number
     // again. Until then the task is not in a syscall, so a signal that
     // arrives first must not apply restart handling to its first argument.
+    let mut native = current;
     let wanted = if phase == REPLAY_PHASE {
         Some(-1)
     } else if own_call {
@@ -987,11 +1118,16 @@ pub fn write_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
         number.filter(|_| logical_number(current) != logical.orig_rax)
     };
     if let Some(wanted) = wanted {
-        if i64::from(wanted) != current && !write_syscallno(pid, wanted) {
-            return -1;
+        if i64::from(wanted) != current {
+            if !write_syscallno(pid, wanted) {
+                return -1;
+            }
+            native = i64::from(wanted);
         }
     }
+    remember_stop(pid, &raw, native);
     if let (Some(slot), Some(mut record)) = (slot, record) {
+        record.native = native;
         if phase != REPLAY_PHASE {
             // The exit stop shows what the supervisor left in the
             // registers, as it does on x86-64, where they are the tracee's.

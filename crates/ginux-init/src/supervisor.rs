@@ -239,6 +239,7 @@ pub fn stopped(status: i32) -> bool {
 }
 
 pub fn ptrace(request: usize, pid: usize, addr: usize, data: usize) -> isize {
+    crate::arch::before_ptrace(request, pid);
     unsafe { syscall4(SYS_PTRACE, request, pid, addr, data) }
 }
 
