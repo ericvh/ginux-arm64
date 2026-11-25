@@ -63,12 +63,34 @@ else
 fi
 rm -f "$ROCKY_SERIAL_LOG"
 
+# The host is emulated, as upstream's is. ROCKY_ACCEL=kvm runs it on the
+# machine's own CPU instead, which needs a machine of the host's
+# architecture and access to /dev/kvm.
+case ${ROCKY_ACCEL:-tcg} in
+    tcg)
+        accel=tcg,thread=multi
+        accel_name=TCG
+        aarch64_cpu=cortex-a72
+        aarch64_gic=3
+        ;;
+    kvm)
+        accel=kvm
+        accel_name=KVM
+        aarch64_cpu=host
+        aarch64_gic=host
+        ;;
+    *)
+        printf 'ROCKY_ACCEL must be tcg or kvm\n' >&2
+        exit 2
+        ;;
+esac
+
 case $ROCKY_ARCH in
     x86_64)
-        host_progress "starting x86-64 QEMU (TCG, $vcpus vCPUs, $memory_mib MiB)"
+        host_progress "starting x86-64 QEMU ($accel_name, $vcpus vCPUs, $memory_mib MiB)"
         qemu-system-x86_64 \
             -machine q35 \
-            -accel tcg,thread=multi \
+            -accel "$accel" \
             -cpu max \
             -smp "$vcpus" \
             -m "${memory_mib}M" \
@@ -94,11 +116,11 @@ case $ROCKY_ARCH in
                 "$firmware" >&2
             exit 2
         fi
-        host_progress "starting aarch64 QEMU (TCG, $vcpus vCPUs, $memory_mib MiB)"
+        host_progress "starting aarch64 QEMU ($accel_name, $vcpus vCPUs, $memory_mib MiB)"
         qemu-system-aarch64 \
-            -machine virt,gic-version=3 \
-            -accel tcg,thread=multi \
-            -cpu "${ROCKY_AARCH64_CPU:-cortex-a72}" \
+            -machine "virt,gic-version=$aarch64_gic" \
+            -accel "$accel" \
+            -cpu "${ROCKY_AARCH64_CPU:-$aarch64_cpu}" \
             -smp "$vcpus" \
             -m "${memory_mib}M" \
             -display none \
