@@ -5755,9 +5755,9 @@ fn supervise_native(
     if ptrace(PTRACE_SETOPTIONS, pid, 0, options) < 0 {
         native_fail(instance, pid, b"native ptrace setup failed");
     }
-    if ptrace(PTRACE_CONT, pid, 0, 0) < 0 {
-        native_fail(instance, pid, b"native ptrace resume failed");
-    }
+    // These lines go out before the tracee is resumed. Once it runs it
+    // reports its own authority on the same stream, and each line here is
+    // several writes: on a fast machine the tracee's line landed inside one.
     if mode == 3 {
         write_all(
             b"GINUX_NATIVE: backend=ptrace-native profile=balanced elf-loader=host contract=",
@@ -5776,6 +5776,9 @@ fn supervise_native(
         write_all(b" tracee-gid=");
         write_u64(identity.gid as u64);
         line(b" root=oci-read-only");
+    }
+    if ptrace(PTRACE_CONT, pid, 0, 0) < 0 {
+        native_fail(instance, pid, b"native ptrace resume failed");
     }
 
     let mut sequence = 0u64;
