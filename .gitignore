@@ -5,3 +5,5 @@
 /docs/paper/*.log
 /docs/paper/*.pdf
 /.artifacts/
+/baremetal/target/
+/baremetal/legacy-kernel/target/
