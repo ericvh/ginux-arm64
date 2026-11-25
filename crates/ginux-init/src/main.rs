@@ -12350,64 +12350,6 @@ fn arch_main() -> ! {
     exit_process(0)
 }
 
-/// The interception demonstration on aarch64. The kernel has no
-/// `PTRACE_SYSEMU` there, so the payload runs in the Ginux runtime, which
-/// decides each `svc` without the host executing any of them.
-#[cfg(target_arch = "aarch64")]
-fn gate1_main() -> ! {
-    const EM_AARCH64: u16 = 183;
-    line(b"GINUX: interception platform=elf-loader");
-    static PATH: &[u8] = b"/var/tmp/ginux-managed-payload\0";
-    let length = read_file(PATH.as_ptr()).unwrap_or_else(|_| fail(b"payload open failed"));
-    let elf =
-        unsafe { core::slice::from_raw_parts(core::ptr::addr_of!(ELF_BYTES).cast::<u8>(), length) };
-    let mut memory = AddressSpace::new();
-    let loaded = match memory.load_elf(elf) {
-        Ok(loaded) => loaded,
-        Err(_) => fail(b"payload ELF rejected"),
-    };
-    if loaded.machine != EM_AARCH64 || loaded.entry & 3 != 0 {
-        fail(b"payload is not an aligned aarch64 ELF");
-    }
-    line(b"GINUX: elf=loaded machine=aarch64 entry-align=4");
-    let stack = match memory.build_stack(&[], &[]) {
-        Ok(stack) => stack,
-        Err(_) => fail(b"payload stack rejected"),
-    };
-    let report = match execute(&memory, loaded.entry, stack, 10_000, loaded.machine) {
-        Ok(report) => report,
-        Err(_) => fail(b"payload interpretation failed"),
-    };
-    let mut saw_getpid = false;
-    let mut saw_write = false;
-    let mut saw_uname = false;
-    for record in report.audit.iter().take(report.audit_len) {
-        match (record.syscall, record.action) {
-            (SYS_GETPID, AuditAction::Emulate) if record.result == 4242 => {
-                saw_getpid = true;
-                line(b"GINUX: syscall=getpid decision=emulate result=4242");
-            }
-            (SYS_WRITE, AuditAction::Mediate) => {
-                saw_write = true;
-                line(b"GINUX: syscall=write decision=mediate host-write=not-executed");
-            }
-            (SYS_UNAME, AuditAction::Deny) if record.result == -1 => {
-                saw_uname = true;
-                line(b"GINUX: syscall=uname decision=deny errno=EPERM");
-            }
-            (SYS_EXIT, AuditAction::Emulate) => {}
-            _ => fail(b"unexpected interpreted syscall"),
-        }
-    }
-    if report.exit_code == 0 && saw_getpid && saw_write && saw_uname {
-        line(b"GINUX: direct-host-syscall bypass=not-observed");
-        line(b"GATE1: PASS");
-        exit_process(0);
-    }
-    fail(b"payload reported failure");
-}
-
-#[cfg(target_arch = "x86_64")]
 fn gate1_main() -> ! {
     line(b"GINUX: interception platform=ptrace-sysemu");
 
@@ -12507,7 +12449,6 @@ fn runtime_fail(reason: &[u8]) -> ! {
     exit_process(1)
 }
 
-#[cfg_attr(target_arch = "aarch64", allow(dead_code))]
 fn tracee() -> ! {
     let traced = unsafe { syscall4(SYS_PTRACE, PTRACE_TRACEME, 0, 0, 0) };
     if traced < 0 {
@@ -12552,13 +12493,11 @@ fn tracee() -> ! {
     }
 }
 
-#[cfg_attr(target_arch = "aarch64", allow(dead_code))]
 fn supervise_setup_fail(pid: usize, reason: &[u8]) -> ! {
     kill_tracee(pid);
     fail(reason)
 }
 
-#[cfg_attr(target_arch = "aarch64", allow(dead_code))]
 fn supervise(pid: usize) -> ! {
     let mut status = 0i32;
     if wait(pid, &mut status) < 0 || !stopped(status) {
@@ -12646,6 +12585,8 @@ fn supervise(pid: usize) -> ! {
             }
         }
 
+        // PTRACE_SYSEMU runs no call: `rax` is the result the payload sees.
+        arch::emulated_result(&mut regs);
         if write_user_regs(pid, 0, &regs as *const _ as usize) < 0 {
             fail(b"PTRACE_SETREGS failed");
         }

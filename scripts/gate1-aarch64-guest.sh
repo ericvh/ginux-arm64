@@ -44,7 +44,8 @@ trap 'rm -rf "$share" "$initrd_dir" "$log"' EXIT
 
 cp "$ginux" "$share/ginux"
 cp "$payload" "$share/ginux-managed-payload"
-chmod 755 "$share/ginux" "$share/ginux-managed-payload" "$root/.artifacts/aarch64-gate1-init"
+# The payload runs as the unprivileged host identity and must reach its file.
+chmod 755 "$share" "$share/ginux" "$share/ginux-managed-payload" "$root/.artifacts/aarch64-gate1-init"
 
 mkdir -p "$initrd_dir"
 cp "$root/.artifacts/aarch64-gate1-init" "$initrd_dir/init"
@@ -73,8 +74,20 @@ if grep -q "UNMEDIATED_PAYLOAD_WRITE" "$log"; then
     echo "gate 1 payload write reached the host" >&2
     exit 1
 fi
-if ! grep -q "GATE1: PASS" "$log"; then
-    echo "aarch64 gate 1 did not pass" >&2
+for expected in \
+    "GINUX: interception platform=ptrace-sysemu" \
+    "GINUX: syscall=getpid decision=emulate result=4242" \
+    "GINUX: syscall=write decision=mediate host-write=not-executed" \
+    "GINUX: syscall=uname decision=deny errno=EPERM" \
+    "GINUX: direct-host-syscall bypass=not-observed" \
+    "GATE1: PASS"; do
+    if ! grep -qF "$expected" "$log"; then
+        echo "aarch64 gate 1 did not report: $expected" >&2
+        exit 1
+    fi
+done
+if grep -q "UNMEDIATED_PAYLOAD_WRITE" "$log"; then
+    echo "aarch64 gate 1 let the payload write reach the host" >&2
     exit 1
 fi
 if ! grep -q "ptrace-init: wait=" "$log" || ! grep -q "status=0" "$log"; then

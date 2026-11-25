@@ -273,3 +273,7 @@ pub unsafe fn syscall6(
     );
     result
 }
+
+/// Prepare a register file for a call that `PTRACE_SYSEMU` stopped and the
+/// kernel will not run. `rax` already is the result on x86-64.
+pub fn emulated_result(_regs: &mut UserRegs) {}

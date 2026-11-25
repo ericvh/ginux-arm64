@@ -44,7 +44,8 @@ trap 'rm -rf "$share" "$initrd_dir" "$log"' EXIT
 
 cp "$ginux" "$share/ginux"
 cp "$payload" "$share/ginux-managed-payload"
-chmod 755 "$share/ginux" "$share/ginux-managed-payload" "$root/.artifacts/x86_64-gate1-init"
+# The payload runs as the unprivileged host identity and must reach its file.
+chmod 755 "$share" "$share/ginux" "$share/ginux-managed-payload" "$root/.artifacts/x86_64-gate1-init"
 
 mkdir -p "$initrd_dir"
 cp "$root/.artifacts/x86_64-gate1-init" "$initrd_dir/init"

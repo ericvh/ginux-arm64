@@ -883,3 +883,10 @@ pub fn replay_syscall(regs: &mut UserRegs, resume: u64, syscall: u64) {
     regs.orig_rax = syscall;
     regs.cs = REPLAY_PHASE;
 }
+
+/// Prepare a register file for a call that `PTRACE_SYSEMU` stopped and the
+/// kernel will not run. Marking the call skipped makes `write_user_regs`
+/// put `rax` in `x0`, where an entry stop otherwise keeps the first argument.
+pub fn emulated_result(regs: &mut UserRegs) {
+    regs.orig_rax = NO_SYSCALL;
+}
