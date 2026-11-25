@@ -10831,6 +10831,30 @@ fn supervise_native(
             Action::Mediate
                 if mode == 3
                     && syscall == ginux_core::SYS_CLOSE_RANGE
+                    // Only CLOSE_RANGE_UNSHARE (2) and CLOSE_RANGE_CLOEXEC (4).
+                    && registers.rdx as u32 & !6 != 0 =>
+            {
+                // A flag the supervisor does not model never reaches the
+                // host. Later kernels define more of them, and one that
+                // changes which descriptors the call acts on
+                // (CLOSE_RANGE_EXCEPT is every descriptor outside the range)
+                // would reach the protected descriptors and the tracked
+                // tables unseen. The caller gets EINVAL, as from a kernel
+                // that predates the flag.
+                line(b"emulate surface=task-close-range result=-22");
+                registers.orig_rax = u64::MAX;
+                task.awaiting_exit = true;
+                task.override_exit = true;
+                task.override_result = -EINVAL;
+                if write_user_regs(host_pid, 0, &registers as *const _ as usize) < 0
+                    || ptrace(PTRACE_SYSCALL, host_pid, 0, 0) < 0
+                {
+                    native_fail(instance, pid, b"native close_range flags denial failed");
+                }
+            }
+            Action::Mediate
+                if mode == 3
+                    && syscall == ginux_core::SYS_CLOSE_RANGE
                     && registers.rdi as u32 as usize <= INSTANCE_CONSOLE_FD
                     && registers.rsi as u32 >= registers.rdi as u32
                     // Only CLOSE_RANGE_UNSHARE (2) and CLOSE_RANGE_CLOEXEC (4).
