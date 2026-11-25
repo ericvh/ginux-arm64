@@ -8,7 +8,7 @@ rootfs=$GINUX_OCI_CACHE_DIR/$GINUX_OCI_ROOTFS_LAYER
 instance_root=/var/lib/ginux/instances/gate9-failure/root
 log=build/gate9-systemd-failure.log
 
-rocky_scp target/x86_64-unknown-linux-gnu/release/ginux \
+rocky_scp "$GINUX_RELEASE/ginux" \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux"
 rocky_scp config/instance-gate9-failure.toml \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate9-failure.toml"

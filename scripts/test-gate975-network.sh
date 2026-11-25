@@ -12,7 +12,7 @@ GINUX_GATE9_CONFIG=config/instance-gate9.75-network.toml \
 
 rocky_scp config/instance-gate9.75-network.toml \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate9.toml"
-rocky_scp target/x86_64-unknown-linux-gnu/release/ginux \
+rocky_scp "$GINUX_RELEASE/ginux" \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux"
 rocky_scp scripts/ginux-host-instance-helper.sh \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux-host-instance-helper-new"

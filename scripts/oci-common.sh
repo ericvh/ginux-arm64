@@ -2,6 +2,11 @@
 
 GINUX_OCI_CONFIG_FILE=${GINUX_OCI_CONFIG_FILE:-./config/rocky-instance-oci.env}
 . "$GINUX_OCI_CONFIG_FILE"
+# An aarch64 host runs the arm64 image of the same pinned index. Its manifest
+# and cache names are beside the image's file, as <name>-aarch64.env.
+if [ "${ROCKY_ARCH:-x86_64}" = aarch64 ] && [ -f "${GINUX_OCI_CONFIG_FILE%.env}-aarch64.env" ]; then
+    . "${GINUX_OCI_CONFIG_FILE%.env}-aarch64.env"
+fi
 
 GINUX_OCI_CACHE_DIR=${GINUX_OCI_CACHE_DIR_OVERRIDE:-$GINUX_OCI_CACHE_DIR}
 GINUX_OCI_BLOBS_DIR=$GINUX_OCI_CACHE_DIR/blobs/sha256

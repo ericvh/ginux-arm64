@@ -9,7 +9,17 @@ image_ref=${1-}
 cache_root=${2-}
 work_root=${3-}
 platform_os=${GINUX_OCI_PLATFORM_OS:-linux}
-platform_arch=${GINUX_OCI_PLATFORM_ARCH:-amd64}
+# The image is for the machine that runs it.
+case $(uname -m) in
+    aarch64|arm64) host_arch=arm64 ;;
+    *) host_arch=amd64 ;;
+esac
+platform_arch=${GINUX_OCI_PLATFORM_ARCH:-$host_arch}
+# Registries label arm64 manifests with the variant v8.
+case $platform_arch in
+    arm64) platform_variant=v8 ;;
+    *) platform_variant= ;;
+esac
 output=${GINUX_OCI_OUTPUT:-diagnostic}
 result_file=${GINUX_OCI_RESULT_FILE:-}
 
@@ -194,8 +204,8 @@ mv "$body" "$root_blob"
 root_media=$(jq -er '.mediaType // ""' "$root_blob")
 case $root_media in
     application/vnd.oci.image.index.v1+json|application/vnd.docker.distribution.manifest.list.v2+json)
-        manifest_digest=$(jq -er --arg os "$platform_os" --arg arch "$platform_arch" \
-            '.manifests[] | select(.platform.os == $os and .platform.architecture == $arch and ((.platform.variant // "") == "")) | .digest' \
+        manifest_digest=$(jq -er --arg os "$platform_os" --arg arch "$platform_arch" --arg variant "$platform_variant" \
+            '.manifests[] | select(.platform.os == $os and .platform.architecture == $arch and ((.platform.variant // "") == "" or .platform.variant == $variant)) | .digest' \
             "$root_blob" | head -1)
         test -n "$manifest_digest" || {
             printf 'OCI image has no %s/%s manifest: %s\n' "$platform_os" "$platform_arch" "$image_ref" >&2

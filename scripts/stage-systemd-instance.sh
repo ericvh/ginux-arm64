@@ -28,7 +28,7 @@ case $gate9_external_network in
 esac
 
 ./scripts/check-rocky-host.sh
-rocky_scp target/x86_64-unknown-linux-gnu/release/ginux \
+rocky_scp "$GINUX_RELEASE/ginux" \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux"
 rocky_scp "$gate9_config" \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate9.toml"

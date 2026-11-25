@@ -11,7 +11,7 @@ failure_log=build/gate5-vfs-failure.log
 missing_log=build/gate5-vfs-missing.log
 
 ./scripts/check-rocky-host.sh
-rocky_scp target/x86_64-unknown-linux-gnu/release/ginux \
+rocky_scp "$GINUX_RELEASE/ginux" \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux"
 rocky_scp config/instance-gate5.toml \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate5.toml"
@@ -23,7 +23,7 @@ rocky_scp "$index" \
 rocky_ssh 'chmod 0755 /var/tmp/ginux; chmod 0444 /var/tmp/ginux-oci-rootfs.tar /var/tmp/ginux-oci-rootfs.index; /var/tmp/ginux vfs /var/tmp/gate5.toml /var/tmp/ginux-oci-rootfs.tar /var/tmp/ginux-oci-rootfs.index' > "$vfs_log" 2>&1
 grep -Fqx "GINUX_VFS: root=docker.io/rockylinux/rockylinux@$GINUX_OCI_MANIFEST_DIGEST" "$vfs_log"
 grep -Fqx 'GINUX_VFS: base=/etc/os-release identity=Rocky-Linux' "$vfs_log"
-grep -Fqx 'GINUX_VFS: base=/usr/bin/bash format=ELF64-x86_64' "$vfs_log"
+grep -Fqx "GINUX_VFS: base=/usr/bin/bash format=ELF64-$ROCKY_ARCH" "$vfs_log"
 grep -Fqx 'GINUX_VFS: overlay=/ginux-overlay-proof value=instance-local' "$vfs_log"
 grep -Fqx 'GINUX_VFS: managed-host-paths=unexposed managed-host-fds=unexposed' "$vfs_log"
 grep -Fqx 'GINUX_VFS: teardown overlay-files=0 descriptors=0' "$vfs_log"

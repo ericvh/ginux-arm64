@@ -11,7 +11,13 @@ set user [lindex $argv 2]
 set instance_root [lindex $argv 3]
 set log [lindex $argv 4]
 set measurements [lindex $argv 5]
-set timeout 50
+# GINUX_EXPECT_TIME_SCALE stretches the short limits for an emulated host
+# that is slower than the one they were chosen on.
+set scale 1
+if {[info exists env(GINUX_EXPECT_TIME_SCALE)]} {
+    set scale $env(GINUX_EXPECT_TIME_SCALE)
+}
+set timeout [expr {50 * $scale}]
 set started_ms [clock milliseconds]
 set send_slow {1 .005}
 set audit_override false
@@ -115,7 +121,7 @@ expect {
 }
 puts stderr "requesting controlled instance poweroff"
 send -s -- "kill -RTMIN+4 1\n"
-set timeout 120
+set timeout [expr {120 * $scale}]
 expect {
     eof {}
     timeout { puts stderr "controlled instance poweroff timed out"; exit 78 }

@@ -11,6 +11,20 @@ use url::Url;
 
 const ACCEPT_MANIFESTS: &str = "application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json";
 
+/// The OCI platform of the machine this runs on: an image is pulled for the
+/// host that will run its workload.
+const OCI_ARCHITECTURE: &str = if cfg!(target_arch = "aarch64") {
+    "arm64"
+} else {
+    "amd64"
+};
+/// Registries label arm64 manifests with this variant; amd64 ones have none.
+const OCI_VARIANT: &str = if cfg!(target_arch = "aarch64") {
+    "v8"
+} else {
+    ""
+};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImageReference {
     pub registry: String,
@@ -336,11 +350,16 @@ fn select_manifest(document: &Value) -> Result<Option<Descriptor>, String> {
             .and_then(|value| value.get("variant"))
             .and_then(Value::as_str)
             .unwrap_or("");
-        if os == Some("linux") && architecture == Some("amd64") && variant.is_empty() {
+        if os == Some("linux")
+            && architecture == Some(OCI_ARCHITECTURE)
+            && (variant.is_empty() || variant == OCI_VARIANT)
+        {
             return descriptor(Some(manifest), "platform manifest").map(Some);
         }
     }
-    Err("OCI image has no linux/amd64 manifest".into())
+    Err(format!(
+        "OCI image has no linux/{OCI_ARCHITECTURE} manifest"
+    ))
 }
 
 fn descriptor(value: Option<&Value>, label: &str) -> Result<Descriptor, String> {

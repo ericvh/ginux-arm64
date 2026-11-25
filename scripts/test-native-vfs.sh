@@ -9,7 +9,7 @@ native_log=build/gate5-native.log
 instance_root=/var/lib/ginux/instances/gate5/root
 
 ./scripts/check-rocky-host.sh
-rocky_scp target/x86_64-unknown-linux-gnu/release/ginux \
+rocky_scp "$GINUX_RELEASE/ginux" \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux"
 rocky_scp config/instance-gate5.toml \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/gate5.toml"

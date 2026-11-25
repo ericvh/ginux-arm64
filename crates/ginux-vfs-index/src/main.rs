@@ -383,9 +383,18 @@ fn verify_index(source: &mut File, mut index_file: File) -> Result<(), Box<dyn s
     let mut bytes = Vec::new();
     index_file.read_to_end(&mut bytes)?;
     let index = Index::new(&bytes).map_err(|_| "generated index failed validation")?;
+    // The dynamic loader is named for the image's architecture. This tool
+    // runs on the build machine, so it goes by what the image contains.
+    let loader = [
+        b"/usr/lib64/ld-linux-x86-64.so.2".as_slice(),
+        b"/usr/lib/ld-linux-aarch64.so.1".as_slice(),
+    ]
+    .into_iter()
+    .find(|path| index.resolve(path).is_ok())
+    .unwrap_or(b"/usr/lib64/ld-linux-x86-64.so.2".as_slice());
     for path in [
         b"/usr/bin/bash".as_slice(),
-        b"/usr/lib64/ld-linux-x86-64.so.2".as_slice(),
+        loader,
         b"/usr/lib64/libc.so.6".as_slice(),
     ] {
         let entry = index.resolve(path).map_err(|_| {
