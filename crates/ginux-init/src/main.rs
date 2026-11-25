@@ -7621,6 +7621,13 @@ fn supervise_native(
                     .ok()
                     .and_then(|candidate| candidate.destinations().first().copied().flatten())
                     .map(|destination| destination.port);
+                // `connect` to an `AF_UNSPEC` address dissolves a datagram
+                // socket's association. It names no destination, so there
+                // is no port to allow or deny and no source to bind.
+                let dissolve = network_protocol == Some(NetworkProtocol::Udp)
+                    && snapshot
+                        .as_ref()
+                        .is_ok_and(|candidate| candidate.unspecified());
                 if network_protocol.is_none() {
                     error = Some(-EPERM);
                 } else if let Some(port) = port {
@@ -7633,7 +7640,7 @@ fn supervise_native(
                     }
                 } else if let Err(snapshot_error) = &snapshot {
                     error = Some(*snapshot_error);
-                } else {
+                } else if !dissolve {
                     error = Some(-EINVAL);
                 }
                 if error == Some(-EPERM) {
@@ -7645,7 +7652,7 @@ fn supervise_native(
                     write_u64(EPERM as u64);
                     write_all(b"\n");
                 }
-                if error.is_none() && !ingress {
+                if error.is_none() && !ingress && !dissolve {
                     if let Some(source) = instance.config().network_source_ipv4() {
                         let socket_index = native_socket_object_index(
                             &descriptor_tables[task.descriptor_table],

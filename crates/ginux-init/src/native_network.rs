@@ -43,6 +43,9 @@ pub struct Destination {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum AddressKind {
     Internet,
+    /// An internet address, or the `AF_UNSPEC` address that `connect` takes
+    /// to dissolve a socket's association.
+    InternetOrUnspecified,
     UnixPath,
 }
 
@@ -62,6 +65,7 @@ pub struct Pending {
     pub netlink_sequence: u32,
     sockaddr_offset: usize,
     sockaddr_word: u64,
+    unspecified: bool,
 }
 
 pub struct Buffer {
@@ -186,6 +190,7 @@ impl Pending {
             netlink_sequence: 0,
             sockaddr_offset: 0,
             sockaddr_word: 0,
+            unspecified: false,
         }
     }
 
@@ -207,11 +212,23 @@ impl Pending {
             address: BASE + slot as u64 * STRIDE,
             ..Self::empty()
         };
-        let (offset, destination) =
-            snapshot_destination(pid, regs.rsi, regs.rdx, buffer, AddressKind::Internet)?;
-        let destination = destination.ok_or(-EINVAL)?;
+        // `connect` with an `AF_UNSPEC` address names no destination: it
+        // dissolves the socket's association. It is snapshotted like any
+        // other address, so the kernel reads the family the supervisor saw.
+        let kind = if regs.orig_rax == SYS_CONNECT {
+            AddressKind::InternetOrUnspecified
+        } else {
+            AddressKind::Internet
+        };
+        let (offset, destination) = snapshot_destination(pid, regs.rsi, regs.rdx, buffer, kind)?;
+        if destination.is_none() {
+            if regs.rsi == 0 || kind != AddressKind::InternetOrUnspecified {
+                return Err(-EINVAL);
+            }
+            pending.unspecified = true;
+        }
         pending.message_count = 1;
-        pending.destinations[0] = Some(destination);
+        pending.destinations[0] = destination;
         pending.sockaddr_offset = offset;
         pending.sockaddr_word = buffer.read_u64(offset);
         pending.replay[0] = [regs.rdi, pending.address + offset as u64, regs.rdx, 0, 0, 0];
@@ -220,6 +237,11 @@ impl Pending {
 
     pub fn sockaddr_word(&self) -> u64 {
         self.sockaddr_word
+    }
+
+    /// Whether this is a `connect` to an `AF_UNSPEC` address.
+    pub fn unspecified(&self) -> bool {
+        self.unspecified
     }
 
     pub fn set_sockaddr_word(&mut self, buffer: &mut Buffer, word: u64) {
@@ -879,7 +901,7 @@ fn snapshot_destination(
         return Err(-EINVAL);
     }
     let minimum = match address_kind {
-        AddressKind::Internet => 4,
+        AddressKind::Internet | AddressKind::InternetOrUnspecified => 4,
         AddressKind::UnixPath => 3,
     };
     if length < minimum {
@@ -901,6 +923,7 @@ fn snapshot_destination(
     let required = match family {
         2 => 16,
         10 => 28,
+        0 if address_kind == AddressKind::InternetOrUnspecified => return Ok((offset, None)),
         _ => return Err(-EINVAL),
     };
     if length < required {
