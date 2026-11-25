@@ -12213,7 +12213,7 @@ fn instance_main(config_path: *const u8, fixture_path: *const u8) -> ! {
         Ok(stack) => stack,
         Err(_) => instance_fail(&mut instance, b"managed stack rejected"),
     };
-    let report = match execute(&memory, loaded.entry, stack, 10_000) {
+    let report = match execute(&memory, loaded.entry, stack, 10_000, loaded.machine) {
         Ok(report) => report,
         Err(_) => instance_fail(&mut instance, b"managed execution failed"),
     };
@@ -12409,7 +12409,7 @@ fn runtime_main(path: *const u8) -> ! {
     line(b"GINUX_RUNTIME: memory=ginux-owned host-pointers=unreachable protections=enforced");
     line(b"GINUX_RUNTIME: stack=linux-x86_64 argc=2 envc=1");
 
-    let report = match execute(&memory, loaded.entry, stack, 10_000) {
+    let report = match execute(&memory, loaded.entry, stack, 10_000, loaded.machine) {
         Ok(report) => report,
         Err(_) => runtime_fail(b"interpreter execution failed"),
     };
