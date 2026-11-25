@@ -1,10 +1,10 @@
 #!/bin/sh
 set -eu
 
-. ./config/rocky-host-image.env
+. ./scripts/rocky-image-env.sh
 
 image=${ROCKY_IMAGE_PATH:-build/cache/rocky/$ROCKY_IMAGE_NAME}
-published=$(awk '/^SHA256 / {print $NF}' config/rocky-host-image.CHECKSUM)
+published=$(awk '/^SHA256 / {print $NF}' "$ROCKY_CHECKSUM_FILE")
 if [ "$published" != "$ROCKY_IMAGE_SHA256" ]; then
     printf '%s\n' 'tracked Rocky published checksum disagrees with image manifest' >&2
     exit 1

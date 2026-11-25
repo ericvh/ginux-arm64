@@ -6,10 +6,10 @@ set -eu
 log=build/gate1-intercept.log
 ./scripts/check-rocky-host.sh
 rocky_scp \
-    target/x86_64-unknown-linux-gnu/release/ginux \
+    "$GINUX_RELEASE/ginux" \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux"
 rocky_scp \
-    target/x86_64-unknown-linux-gnu/release/managed-payload \
+    "$GINUX_RELEASE/managed-payload" \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux-managed-payload"
 rocky_ssh 'chmod 0755 /var/tmp/ginux /var/tmp/ginux-managed-payload; /var/tmp/ginux' > "$log" 2>&1
 

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-. ./config/rocky-host-image.env
+. ./scripts/rocky-image-env.sh
 . ./scripts/rocky-host-common.sh
 
 start_epoch=$(date +%s)
@@ -63,27 +63,68 @@ else
 fi
 rm -f "$ROCKY_SERIAL_LOG"
 
-host_progress "starting x86-64 QEMU (TCG, $vcpus vCPUs, $memory_mib MiB)"
-qemu-system-x86_64 \
-    -machine q35 \
-    -accel tcg,thread=multi \
-    -cpu max \
-    -smp "$vcpus" \
-    -m "${memory_mib}M" \
-    -display none \
-    -daemonize \
-    -pidfile "$ROCKY_PID_FILE" \
-    -serial "file:$ROCKY_SERIAL_LOG" \
-    -monitor none \
-    -no-reboot \
-    -drive "if=virtio,format=qcow2,file=$overlay" \
-    -drive "if=ide,media=cdrom,readonly=on,format=raw,file=build/rocky-seed.iso" \
-    -netdev "user,id=net0,restrict=$network_restrict,hostfwd=tcp:127.0.0.1:$ROCKY_SSH_PORT-:22" \
-    -device virtio-net-pci,netdev=net0
+case $ROCKY_ARCH in
+    x86_64)
+        host_progress "starting x86-64 QEMU (TCG, $vcpus vCPUs, $memory_mib MiB)"
+        qemu-system-x86_64 \
+            -machine q35 \
+            -accel tcg,thread=multi \
+            -cpu max \
+            -smp "$vcpus" \
+            -m "${memory_mib}M" \
+            -display none \
+            -daemonize \
+            -pidfile "$ROCKY_PID_FILE" \
+            -serial "file:$ROCKY_SERIAL_LOG" \
+            -monitor none \
+            -no-reboot \
+            -drive "if=virtio,format=qcow2,file=$overlay" \
+            -drive "if=ide,media=cdrom,readonly=on,format=raw,file=build/rocky-seed.iso" \
+            -netdev "user,id=net0,restrict=$network_restrict,hostfwd=tcp:127.0.0.1:$ROCKY_SSH_PORT-:22" \
+            -device virtio-net-pci,netdev=net0
+        ssh_attempts=120
+        ;;
+    aarch64)
+        # The virt machine boots through Arm UEFI firmware and has no IDE
+        # bus, so the seed is a SCSI CD-ROM. The firmware's variable store
+        # is not kept: the image boots from its removable-media path.
+        firmware=${GINUX_AAVMF_DIR:-/usr/share/AAVMF}
+        if [ ! -f "$firmware/AAVMF_CODE.fd" ] || [ ! -f "$firmware/AAVMF_VARS.fd" ]; then
+            printf 'Arm UEFI firmware not found in %s; install qemu-efi-aarch64 or set GINUX_AAVMF_DIR\n' \
+                "$firmware" >&2
+            exit 2
+        fi
+        host_progress "starting aarch64 QEMU (TCG, $vcpus vCPUs, $memory_mib MiB)"
+        qemu-system-aarch64 \
+            -machine virt,gic-version=3 \
+            -accel tcg,thread=multi \
+            -cpu "${ROCKY_AARCH64_CPU:-cortex-a72}" \
+            -smp "$vcpus" \
+            -m "${memory_mib}M" \
+            -display none \
+            -daemonize \
+            -pidfile "$ROCKY_PID_FILE" \
+            -serial "file:$ROCKY_SERIAL_LOG" \
+            -monitor none \
+            -no-reboot \
+            -drive "if=pflash,unit=0,format=raw,readonly=on,file=$firmware/AAVMF_CODE.fd" \
+            -drive "if=pflash,unit=1,format=raw,snapshot=on,file=$firmware/AAVMF_VARS.fd" \
+            -drive "if=none,id=rootdisk,format=qcow2,file=$overlay" \
+            -device virtio-blk-pci,drive=rootdisk,bootindex=1 \
+            -drive "if=none,id=cidata,media=cdrom,readonly=on,format=raw,file=build/rocky-seed.iso" \
+            -device virtio-scsi-pci \
+            -device scsi-cd,drive=cidata \
+            -netdev "user,id=net0,restrict=$network_restrict,hostfwd=tcp:127.0.0.1:$ROCKY_SSH_PORT-:22" \
+            -device virtio-net-pci,netdev=net0 \
+            -device virtio-rng-pci
+        # An emulated Arm guest takes longer to reach SSH on first boot.
+        ssh_attempts=360
+        ;;
+esac
 
 host_progress 'waiting for SSH'
 attempt=0
-while [ "$attempt" -lt 120 ]; do
+while [ "$attempt" -lt "$ssh_attempts" ]; do
     if rocky_ssh true >/dev/null 2>&1; then
         host_progress 'SSH ready; waiting for cloud-init'
         cloud_attempt=0
@@ -98,7 +139,12 @@ while [ "$attempt" -lt 120 ]; do
         done
         if [ "$network_restrict" = off ]; then
             host_progress 'cloud-init ready; enabling guest network access'
-            rocky_ssh "sudo ip route replace default via 10.0.2.2 dev enp0s2; printf '%s\n' 'nameserver 10.0.2.3' | sudo tee /etc/resolv.conf >/dev/null"
+            # The virt machine names its network device differently.
+            case $ROCKY_ARCH in
+                x86_64) guest_device=enp0s2 ;;
+                *) guest_device=$(rocky_ssh "ls /sys/class/net | grep -v '^lo\$' | sed -n 1p") ;;
+            esac
+            rocky_ssh "sudo ip route replace default via 10.0.2.2 dev $guest_device; printf '%s\n' 'nameserver 10.0.2.3' | sudo tee /etc/resolv.conf >/dev/null"
         fi
         host_progress 'SSH and cloud-init ready'
         exit 0

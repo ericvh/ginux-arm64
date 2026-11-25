@@ -487,7 +487,7 @@ ARM64_CC ?= $(if $(filter aarch64,$(shell uname -m)),$(CC),aarch64-linux-gnu-gcc
 ARM64_LAUNCH := .artifacts/launch-arm64
 ARM64_FIXTURE_CFLAGS := -nostdlib -static -fno-stack-protector -fno-builtin -O2 -Wall -Wextra -Werror -I$(ARM64_LAUNCH)
 
-.PHONY: build-arm64 check-arm64 arch-smoke arch-smoke-arm64 gate1-aarch64-guest gate1-x86_64-guest native-aarch64-guest legacy-kernel-aarch64 uefi-aarch64-guest build-launch-fixture-arm64 test-native-supervision-arm64 native-suite-aarch64-guest
+.PHONY: build-arm64 check-arm64 arch-smoke arch-smoke-arm64 gate1-aarch64-guest gate1-x86_64-guest native-aarch64-guest legacy-kernel-aarch64 uefi-aarch64-guest build-launch-fixture-arm64 test-native-supervision-arm64 native-suite-aarch64-guest build-arm64-host-suite host-image-fetch-arm64 test-arm64
 
 build-arm64:
 	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo build -p ginux-init --target $(ARM64_TARGET) --release
@@ -496,6 +496,7 @@ build-arm64:
 check-arm64:
 	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo clippy -p ginux-init --bin ginux --target $(ARM64_TARGET) --release -- -D warnings
 	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo clippy -p managed-payload --bin managed-payload --target $(ARM64_TARGET) --release -- -D warnings
+	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo clippy -p process-native-fixture --bin process-native-fixture --target $(ARM64_TARGET) --release -- -D warnings
 
 arch-smoke: build
 	@./scripts/arch-smoke.sh $(GINUX) x86_64
@@ -529,6 +530,27 @@ test-native-supervision-arm64:
 # The same script in an arm64 guest, for hosts of another architecture.
 native-suite-aarch64-guest: build-arm64 build-launch-fixture-arm64
 	@./scripts/native-suite-aarch64-guest.sh
+
+# Upstream's `make test` host suite against a Rocky Linux 10 aarch64 host.
+# The scripts are upstream's; ROCKY_ARCH selects the image, the emulator, and
+# the binaries they copy to the host. The runtime fixture stays the x86-64
+# ELF, which the aarch64 daemon interprets. The static CLI links with
+# rust-lld so that an x86_64 machine can build it.
+ARM64_CLI_TARGET := aarch64-unknown-linux-musl
+ARM64_CLI_RUSTFLAGS ?= $(if $(filter aarch64,$(shell uname -m)),,-C linker=rust-lld)
+
+build-arm64-host-suite: build-arm64
+	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo build -p process-native-fixture --target $(ARM64_TARGET) --release
+	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo build -p runtime-fixture --target $(X86_TARGET) --release
+	RUSTFLAGS='$(ARM64_CLI_RUSTFLAGS)' cargo build -p ginux-cli --target $(ARM64_CLI_TARGET) --release
+
+host-image-fetch-arm64:
+	@ROCKY_ARCH=aarch64 ./scripts/fetch-rocky-host.sh
+
+# One boot of the host runs every script, in the order `make test` does.
+test-arm64: build-arm64-host-suite
+	@ROCKY_ARCH=aarch64 ./scripts/test-rocky-instance.sh
+	@ROCKY_ARCH=aarch64 ./scripts/with-rocky-host.sh ./scripts/test-host-suite.sh
 
 # The bare-metal kernel line is its own workspace under baremetal/.
 legacy-kernel-aarch64 uefi-aarch64-guest:

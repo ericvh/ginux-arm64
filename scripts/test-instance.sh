@@ -11,7 +11,7 @@ rerun_log=build/gate4-instance-rerun.log
 
 ./scripts/check-rocky-host.sh
 rocky_scp \
-    target/x86_64-unknown-linux-gnu/release/ginux \
+    "$GINUX_RELEASE/ginux" \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/ginux"
 rocky_scp \
     target/x86_64-unknown-linux-gnu/release/runtime-fixture \

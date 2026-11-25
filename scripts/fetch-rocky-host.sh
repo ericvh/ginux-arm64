@@ -1,14 +1,14 @@
 #!/bin/sh
 set -eu
 
-. ./config/rocky-host-image.env
+. ./scripts/rocky-image-env.sh
 
 destination=build/cache/rocky/$ROCKY_IMAGE_NAME
 temporary=${destination}.download
 mkdir -p build/cache/rocky
 trap 'rm -f "$temporary"' 0 HUP INT TERM
 
-published=$(awk '/^SHA256 / {print $NF}' config/rocky-host-image.CHECKSUM)
+published=$(awk '/^SHA256 / {print $NF}' "$ROCKY_CHECKSUM_FILE")
 if [ "$published" != "$ROCKY_IMAGE_SHA256" ]; then
     printf '%s\n' 'tracked Rocky published checksum disagrees with image manifest' >&2
     exit 1

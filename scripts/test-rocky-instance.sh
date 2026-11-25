@@ -23,11 +23,23 @@ printf '  [2/8] PASS  Prepared artifacts: rootfs=%s bytes manifest=%s bytes\n' \
 archive_list=$ROCKY_INSTANCE_WORK_DIR/archive.list
 mkdir -p "$ROCKY_INSTANCE_WORK_DIR"
 tar -tf "$ROCKY_INSTANCE_ROOTFS_PATH" > "$archive_list"
+case ${ROCKY_ARCH:-x86_64} in
+    aarch64)
+        loader=./usr/lib/ld-linux-aarch64.so.1
+        machine='ARM aarch64'
+        machine_name=aarch64
+        ;;
+    *)
+        loader=./usr/lib64/ld-linux-x86-64.so.2
+        machine=x86-64
+        machine_name=x86-64
+        ;;
+esac
 for required in \
     ./etc/os-release \
     ./etc/machine-id \
     ./usr/lib/systemd/systemd \
-    ./usr/lib64/ld-linux-x86-64.so.2; do
+    "$loader"; do
     grep -Fqx "$required" "$archive_list"
 done
 
@@ -41,8 +53,8 @@ printf '  [3/8] PASS  Userspace identity: Rocky Linux %s\n' "$version"
 systemd_description=$(tar -xOf "$ROCKY_INSTANCE_ROOTFS_PATH" ./usr/lib/systemd/systemd |
     file -)
 printf '%s\n' "$systemd_description" |
-    grep -Fq 'ELF 64-bit LSB pie executable, x86-64'
-printf '%s\n' '  [4/8] PASS  Runtime inputs: machine-id, x86-64 systemd, dynamic loader'
+    grep -Fq "ELF 64-bit LSB pie executable, $machine"
+printf '  [4/8] PASS  Runtime inputs: machine-id, %s systemd, dynamic loader\n' "$machine_name"
 
 manifest_sha=$(shasum -a 256 "$ROCKY_INSTANCE_MANIFEST_PATH" | awk '{print $1}')
 grep -Fqx "SOURCE_SHA256=$source_sha" "$ROCKY_INSTANCE_METADATA_PATH"

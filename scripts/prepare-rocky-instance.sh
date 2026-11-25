@@ -50,6 +50,7 @@ qemu-img convert -f qcow2 -O raw "$ROCKY_SOURCE_IMAGE" "$raw_image"
 
 repository=$(pwd -P)
 docker run --rm --privileged --network none \
+    --env "ROCKY_ROOT_PART=$ROCKY_ROOT_PART" \
     --mount "type=bind,source=$repository,target=/workspace" \
     "$ROCKY_INSTANCE_HELPER_IMAGE" \
     /workspace/scripts/extract-rocky-instance.sh \

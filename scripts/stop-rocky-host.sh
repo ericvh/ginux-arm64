@@ -15,7 +15,7 @@ elif command -v lsof >/dev/null 2>&1; then
             *) overlay_path=$(pwd -P)/$ROCKY_OVERLAY_DISK ;;
         esac
         if [ -n "$candidate" ] &&
-            lsof -nP -a -p "$candidate" -d txt 2>/dev/null | grep -q 'qemu-system-x86_64' &&
+            lsof -nP -a -p "$candidate" -d txt 2>/dev/null | grep -q "qemu-system-$ROCKY_ARCH" &&
             lsof -nP -p "$candidate" 2>/dev/null | grep -Fq " $overlay_path"; then
             pid=$candidate
         fi

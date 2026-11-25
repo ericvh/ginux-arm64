@@ -15,10 +15,12 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 mkdir -p "$mountpoint"
+# The root filesystem is partition 4 of the x86_64 image and 3 of the aarch64.
+root_part=${ROCKY_ROOT_PART:-4}
 partition=$(sfdisk -d "$raw_image" |
-    sed -n 's/.*4 : start= *\([0-9][0-9]*\), size= *\([0-9][0-9]*\),.*/\1 \2/p')
+    sed -n "s/.*$root_part : start= *\\([0-9][0-9]*\\), size= *\\([0-9][0-9]*\\),.*/\\1 \\2/p")
 if [ -z "$partition" ]; then
-    printf '%s\n' 'Rocky root partition 4 was not found' >&2
+    printf 'Rocky root partition %s was not found\n' "$root_part" >&2
     exit 1
 fi
 set -- $partition

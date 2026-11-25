@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-. ./config/rocky-host-image.env
+. ./scripts/rocky-image-env.sh
 . ./scripts/rocky-host-common.sh
 
 ./scripts/verify-rocky-host.sh

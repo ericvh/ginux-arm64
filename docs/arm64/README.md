@@ -93,6 +93,61 @@ Two scenarios differ on aarch64, both for reasons in the architecture:
   `null-wait` and `zero-effects` use the second argument register and are
   real on both.
 
+### Upstream's host suite on Rocky Linux 10 aarch64
+
+Upstream's `make test` boots a pinned Rocky Linux 10 x86_64 cloud image
+under QEMU and runs its host scripts over SSH. `make test-arm64` runs the
+same scripts against the aarch64 daemon on the aarch64 build of that image.
+
+```sh
+rustup target add aarch64-unknown-linux-gnu aarch64-unknown-linux-musl
+make host-image-fetch-arm64   # the pinned Rocky 10.2 aarch64 image, 448 MiB
+make image-helper-fetch       # upstream's extraction helper, for test-image
+make test-arm64
+```
+
+The host needs `qemu-system-aarch64`, Arm UEFI firmware (`qemu-efi-aarch64`;
+`GINUX_AAVMF_DIR` names its directory when it is not `/usr/share/AAVMF`),
+`xorriso` or `genisoimage`, and Docker for the image test.
+
+`ROCKY_ARCH` selects the guest. It defaults to `x86_64`, where every script
+does what upstream's does. With `ROCKY_ARCH=aarch64`:
+
+- `scripts/rocky-image-env.sh` selects `config/rocky-host-image-aarch64.env`
+  and its checksum file. The image is the same Rocky 10.2 build as upstream's
+  x86_64 pin. Rocky has since moved that release to its vault, so the URL
+  points there.
+- `scripts/start-rocky-host.sh` starts `qemu-system-aarch64 -machine virt`
+  with the firmware, the disk as virtio-blk, and the cloud-init seed as a
+  SCSI CD-ROM. `ROCKY_AARCH64_CPU` overrides the `cortex-a72` model.
+- The host keeps its own overlay, pid file, and serial log
+  (`build/rocky-host-aarch64-*`, `build/rocky-test-suite-host-aarch64-*`),
+  because neither architecture can boot the other's disk.
+- The test scripts copy the daemon, the managed payload, and the process
+  fixture from `target/aarch64-unknown-linux-gnu/release`, and the CLI from
+  `target/aarch64-unknown-linux-musl/release`. The runtime fixture stays the
+  x86-64 ELF: `ginux runtime` interprets it on either host.
+- `test-image` extracts root partition 3 (it is 4 on x86_64) and expects an
+  aarch64 `systemd` and `ld-linux-aarch64.so.1`.
+
+`make test-arm64` runs `test-image`, then boots the host once and runs
+`test-intercept`, `test-runtime`, `test-config`, `test-instance` (with
+`test-gate12-cli`), `test-devices`, `test-process`, and `test-kernel-views`
+through `scripts/test-host-suite.sh`. One of them alone:
+
+```sh
+ROCKY_ARCH=aarch64 ./scripts/with-rocky-host.sh ./scripts/test-host-suite.sh process
+```
+
+Only those scripts take `ROCKY_ARCH`. The other Rocky-host targets (systemd,
+OCI, VFS, benchmarks, the RPM) still copy x86_64 binaries and are x86_64
+only.
+
+The original branch for this (`cursor/arm64-rocky-guest-2b05`) made
+`make test` itself boot the aarch64 guest and copied the binaries from a
+virtiofs share of the tree. Here `make test` stays upstream's x86_64 run and
+the binaries go over SSH as upstream's do, which needs no `virtiofsd`.
+
 ## Design
 
 The supervision loops, the contract, and the lane dispatch are written against
@@ -156,7 +211,7 @@ machine. An aarch64 entry point must be 4-byte aligned.
 ## Verified
 
 Run on an x86_64 host with QEMU 10.2 and the v9fs `kernel-v7.4-rc1` arm64
-image, on upstream `f4b85186` (pull request #333):
+image, on upstream `85d53265` (pull request #334):
 
 - `make check` and `make check-arm64` pass; `make test-unit` passes.
 - `make arch-smoke`, `make arch-smoke-arm64`, `make gate1-aarch64-guest`, and
@@ -165,6 +220,10 @@ image, on upstream `f4b85186` (pull request #333):
   `test-native-supervision.py`, in an Alpine 3 arm64 userland with Python
   3.13. The same 42 pass directly on GitHub's `ubuntu-24.04-arm` runner in
   the `aarch64` CI job.
+- `make test-arm64` passes on Rocky Linux 10.2 aarch64 (kernel 6.12) under
+  `qemu-system-aarch64`: `test-image` 8/8, then `test-intercept`,
+  `test-runtime`, `test-config`, `test-instance`, `test-gate12-cli`,
+  `test-devices`, `test-process`, and `test-kernel-views`.
 - The upstream x86_64 integration suite is unchanged in result:
   `test-launch`, `test-native-supervision` (all eight scripts),
   `test-process-native`, `test-gate1-setup`, and `test-tracee-kill` pass.
@@ -190,9 +249,9 @@ target. What is not covered:
   runs on aarch64. The other seven (`test-native-yield-broker.py`, the two
   clone scripts, the two `close_range` scripts, and the two send-snapshot
   scripts) trace the daemon itself and decode its registers as x86-64
-  `user_regs_struct`; they are not ported. `test-launch`,
-  `test-process-native`, systemd instances, OCI images, and the allocator
-  have not been run on aarch64.
+  `user_regs_struct`; they are not ported. `test-launch`, the review
+  scenarios of `test-process-native`, systemd instances, OCI images, and the
+  allocator have not been run on aarch64.
 - `make gate1-x86_64-guest` was not run in this pass.
 
 ## Bare-metal kernel
