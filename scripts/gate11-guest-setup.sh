@@ -4,7 +4,7 @@ set -eu
 instance=gate11-benchmark
 config=/var/tmp/instance-gate11-benchmark.toml
 directory=/var/lib/ginux/instances/$instance
-sysbench_nevra=sysbench-1.0.20-19.el10_2.x86_64
+sysbench_nevra=sysbench-1.0.20-19.el10_2.$(uname -m)
 acquire=${GINUX_BENCH_ACQUIRE:-off}
 
 if ! rpm -q --quiet "$sysbench_nevra"; then

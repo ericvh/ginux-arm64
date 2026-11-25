@@ -67,3 +67,15 @@ rocky_ssh_tty() {
         -o UserKnownHostsFile=/dev/null \
         "$ROCKY_SSH_USER@127.0.0.1" "$@"
 }
+
+# Write the instance config $1 to $2 as this host should get it. The configs
+# name their image by its linux/amd64 manifest. An aarch64 host runs the
+# linux/arm64 image of the same index, so its copy names that manifest.
+rocky_instance_config() {
+    cp "$1" "$2"
+    if [ "$ROCKY_ARCH" = aarch64 ]; then
+        grep '^sha256:' config/examples/arm64-manifests | while read -r amd64 arm64 _; do
+            sed -i "s/$amd64/$arm64/" "$2"
+        done
+    fi
+}

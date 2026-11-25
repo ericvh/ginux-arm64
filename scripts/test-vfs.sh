@@ -10,14 +10,9 @@ vfs_log=build/gate5-vfs.log
 failure_log=build/gate5-vfs-failure.log
 missing_log=build/gate5-vfs-missing.log
 
-config=config/instance-gate5.toml
-if [ "$ROCKY_ARCH" = aarch64 ]; then
-    # The file names its root by the amd64 manifest. This host runs the
-    # arm64 image of the same index, so the staged copy names that one.
-    amd64=$(sed -n 's/^GINUX_OCI_MANIFEST_DIGEST=//p' "$GINUX_OCI_CONFIG_FILE")
-    sed "s/$amd64/$GINUX_OCI_MANIFEST_DIGEST/" "$config" > build/gate5-vfs.toml
-    config=build/gate5-vfs.toml
-fi
+# The staged copy names the image this host runs.
+config=build/gate5-vfs.toml
+rocky_instance_config config/instance-gate5.toml "$config"
 
 ./scripts/check-rocky-host.sh
 rocky_scp "$GINUX_RELEASE/ginux" \

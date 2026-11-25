@@ -28,8 +28,9 @@ test "$(rocky_ssh nproc)" -ge 4 || {
 }
 
 ./scripts/install-ginux-host.sh >/dev/null
-sed "s/^control = \"selective\"/control = \"$dispatch_mode\"/" \
-    config/instance-gate11-benchmark.toml >"$output_dir/instance-config.toml"
+rocky_instance_config config/instance-gate11-benchmark.toml "$output_dir/instance-config.toml"
+sed -i "s/^control = \"selective\"/control = \"$dispatch_mode\"/" \
+    "$output_dir/instance-config.toml"
 rocky_scp "$output_dir/instance-config.toml" \
     "$ROCKY_SSH_USER@127.0.0.1:/var/tmp/instance-gate11-benchmark.toml"
 rocky_scp scripts/gate11-guest-setup.sh scripts/gate11-benchmark-guest.sh \
@@ -78,7 +79,7 @@ fi
     # Expansion belongs to the remote shell.
     # shellcheck disable=SC2016
     rocky_ssh 'printf "host_kernel=%s\n" "$(uname -r)"; printf "host_arch=%s\n" "$(uname -m)"; printf "host_vcpus=%s\n" "$(nproc)"; printf "host_memory_kib=%s\n" "$(awk "/^MemTotal:/ { print \$2 }" /proc/meminfo)"; printf "sysbench_nevra=%s\n" "$(rpm -q sysbench)"; printf "sysbench_sha256=%s\n" "$(sha256sum /usr/bin/sysbench | awk "{ print \$1 }")"; printf "rocky_release=%s\n" "$(cat /etc/rocky-release)"'
-    printf 'instance_image=%s\n' 'docker.io/rockylinux/rockylinux@sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c'
+    printf 'instance_image=%s\n' "$(sed -n 's/^root = "\(.*\)"$/\1/p' "$output_dir/instance-config.toml")"
     printf 'instance_config_sha256=%s\n' "$(sha256sum "$output_dir/instance-config.toml" | awk '{ print $1 }')"
 } >"$output_dir/metadata.txt"
 
