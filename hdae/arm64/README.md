@@ -38,9 +38,10 @@ say an isolation unit is a "domain" they predate upstream's rename to
 | `gates/A4-uefi-kernel.md` | 18 | UEFI kernel with SBSA services |
 | `gates/A5-linux-svc.md` | 19 | AArch64 Linux syscall table on the UEFI boot |
 | `gates/A6-native-supervision-suite.md` | none | Upstream's native-supervision suite on aarch64 |
+| `gates/A7-rocky-host-suite.md` | none | Review of the fifteen original branches; upstream's host suite on Rocky 10 aarch64 |
 
-A6 was written on `arm64/main`, after the rebase below. None of the six was
-accepted by a human reviewer. They stay open.
+A6 and A7 were written on `arm64/main`, after the rebase below. None of the
+seven was accepted by a human reviewer. They stay open.
 
 ## Rebase onto current upstream (2026-11-25)
 
@@ -74,6 +75,12 @@ Differences from the original stack worth knowing:
   the neighbouring one, where the original overwrote both.
 - The UEFI kernel merges adjacent firmware memory ranges. Without that it
   halts on current AAVMF with "firmware memory map is too fragmented".
+
+The first carry-over left out one branch, `cursor/arm64-rocky-guest-2b05`,
+which is not on the line from the first branch to the last. A7 reviews all
+fifteen branches against `arm64/main` and integrates that one. Upstream
+`85d53265` (pull request #334) is merged into `arm64/main` rather than
+rebased under it.
 
 ## Next gate, if the track continues
 
