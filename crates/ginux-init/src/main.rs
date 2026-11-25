@@ -793,6 +793,9 @@ fn supervise_process_native(root_host_pid: usize, instance: &mut Instance) -> ! 
                 )
             }
         };
+        if waited > 0 {
+            arch::after_wait(waited as usize, status);
+        }
         if waited <= 0 {
             process_native_fail(instance, root_host_pid, b"process wait-any failed");
         }
@@ -5919,6 +5922,9 @@ fn supervise_native(
                 )
             }
         };
+        if waited > 0 {
+            arch::after_wait(waited as usize, status);
+        }
         if waited <= 0 {
             native_fail(instance, pid, b"native wait-any failed");
         }

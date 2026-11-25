@@ -231,7 +231,11 @@ pub struct UserRegs {
 }
 
 pub fn wait(pid: usize, status: &mut i32) -> isize {
-    unsafe { syscall4(SYS_WAIT4, pid, status as *mut _ as usize, 0, 0) }
+    let waited = unsafe { syscall4(SYS_WAIT4, pid, status as *mut _ as usize, 0, 0) };
+    if waited > 0 {
+        crate::arch::after_wait(waited as usize, *status);
+    }
+    waited
 }
 
 pub fn stopped(status: i32) -> bool {

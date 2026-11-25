@@ -398,6 +398,10 @@ struct SavedCall {
     /// The kernel's own number for the call, as last read or written. The
     /// kernel does not change it between a call's entry and exit stops.
     native: i64,
+    /// The call was last seen at a syscall-entry stop, which comes before
+    /// its seccomp stop. A number written there shows at that seccomp stop
+    /// in the kernel's number but not in `x8`.
+    before_seccomp: bool,
     /// How the call the tracee issued is shown to the supervisor (see
     /// [`show_call`]), and the argument registers it issued it with, which
     /// are put back where the shown form has no place for them.
@@ -421,6 +425,7 @@ const EMPTY_CALL: SavedCall = SavedCall {
     restart_args: [0; 6],
     restart_x0: 0,
     native: -1,
+    before_seccomp: false,
     shown: SHOWN_AS_ISSUED,
     own: [0; 6],
 };
@@ -576,6 +581,72 @@ fn known_stop(pid: usize) -> Option<(UserPtRegs, i64)> {
     (stop.known && stop.pid == pid).then_some((stop.raw, stop.native))
 }
 
+/// The status `wait` last reported for a tracee, until it can run again.
+struct Reported {
+    pid: usize,
+    known: bool,
+    status: i32,
+}
+
+static mut REPORTED: Reported = Reported {
+    pid: 0,
+    known: false,
+    status: 0,
+};
+
+/// Called with every stop the daemon takes from `wait`. The status says
+/// what kind of stop it is, which saves asking the kernel again.
+pub fn after_wait(pid: usize, status: i32) {
+    unsafe {
+        core::ptr::write(
+            core::ptr::addr_of_mut!(REPORTED),
+            Reported {
+                pid,
+                known: true,
+                status,
+            },
+        );
+    }
+}
+
+/// The kind of stop `pid` is in and, at an entry, the call's number, from
+/// the status `wait` reported and the registers read at the stop. `None`
+/// when the status is not known or does not settle it.
+///
+/// A seccomp stop is an event in the status. A syscall stop is `SIGTRAP`
+/// with bit 7 where `PTRACE_O_TRACESYSGOOD` is set, and the kernel marks
+/// which side it is in `x7`: 0 at the entry, 1 at the exit. At the first
+/// stop of a call `x8` still holds the number the tracee issued, which is
+/// the kernel's number. A seccomp stop that follows an entry stop is not
+/// the first, and a tracer may have changed the number there, so the
+/// kernel is asked. So is it for a plain `SIGTRAP`, which is a syscall
+/// stop where the option is not set.
+fn reported_stop(pid: usize, raw: &UserPtRegs) -> Option<(u8, Option<i64>)> {
+    const SIGTRAP: i32 = 5;
+    const SYSCALL_STOP: i32 = SIGTRAP | 0x80;
+    const SECCOMP_STOP: i32 = SIGTRAP | (7 << 8);
+    let reported = unsafe { &*core::ptr::addr_of!(REPORTED) };
+    if !reported.known || reported.pid != pid || reported.status & 0xff != 0x7f {
+        return None;
+    }
+    let issued = i64::from(raw.regs[8] as i32);
+    match (reported.status >> 8) & 0xffff {
+        SECCOMP_STOP => {
+            let after_entry = find_call(pid)
+                .map(|slot| unsafe { core::ptr::read(slot) })
+                .is_some_and(|record| record.before_seccomp);
+            (!after_entry).then_some((SYSCALL_INFO_SECCOMP, Some(issued)))
+        }
+        SYSCALL_STOP => match raw.regs[7] {
+            0 => Some((SYSCALL_INFO_ENTRY, Some(issued))),
+            1 => Some((SYSCALL_INFO_EXIT, None)),
+            _ => None,
+        },
+        SIGTRAP => None,
+        _ => Some((0, None)),
+    }
+}
+
 /// Called before every `ptrace` request the daemon makes. Requests that
 /// only read or write a stopped tracee leave what is known about its stop
 /// in place; every other request may resume it.
@@ -608,6 +679,10 @@ pub fn before_ptrace(request: usize, pid: usize) {
         let stop = &mut *core::ptr::addr_of_mut!(STOP);
         if stop.pid == pid {
             stop.known = false;
+        }
+        let reported = &mut *core::ptr::addr_of_mut!(REPORTED);
+        if reported.pid == pid {
+            reported.known = false;
         }
     }
 }
@@ -858,9 +933,11 @@ pub fn read_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
     let Some(mut raw) = read_raw(pid) else {
         return -1;
     };
-    let (kind, entered) = stop_kind(pid);
-    // The number comes with the stop kind at an entry, and from the entry's
-    // record at an exit. Only the other stops have to ask for it.
+    // What `wait` reported settles the kind of stop in the usual case;
+    // otherwise the kernel is asked. The number comes with the kind at an
+    // entry, and from the entry's record at an exit. Only the other stops
+    // have to ask for it.
+    let (kind, entered) = reported_stop(pid, &raw).unwrap_or_else(|| stop_kind(pid));
     let recalled = if kind == SYSCALL_INFO_EXIT {
         recall_call(pid, raw.pc)
     } else {
@@ -882,6 +959,13 @@ pub fn read_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
     let mut nr = logical_number(native);
     let (rax, phase) = match kind {
         SYSCALL_INFO_EXIT => {
+            if let Some(slot) = find_call(pid) {
+                unsafe {
+                    let mut record = core::ptr::read(slot);
+                    record.before_seccomp = false;
+                    core::ptr::write(slot, record);
+                }
+            }
             if let Some(saved) = recalled {
                 nr = saved.nr;
                 args = saved.args;
@@ -911,6 +995,7 @@ pub fn read_user_regs(pid: usize, _addr: usize, data: usize) -> isize {
                 record.issued = nr;
                 record.sent_x0 = raw.regs[0];
                 record.native = native;
+                record.before_seccomp = kind == SYSCALL_INFO_ENTRY;
                 core::ptr::write(slot, record);
             }
             (ENTRY_RAX, ENTRY_PHASE)

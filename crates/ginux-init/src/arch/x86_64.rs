@@ -293,3 +293,8 @@ pub fn before_ptrace(_request: usize, _pid: usize) {}
 pub fn abort_trap(_pid: usize) -> bool {
     false
 }
+
+/// Called with every stop the daemon takes from `wait`. x86-64 reads the
+/// kind of stop from the status where it is needed.
+#[inline(always)]
+pub fn after_wait(_pid: usize, _status: i32) {}
