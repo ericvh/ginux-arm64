@@ -1,6 +1,8 @@
 //! Native clone3 argument ownership. The host reads only a private read-only
 //! anonymous snapshot, never a validated-then-reused caller structure.
-use crate::supervisor::{poke_tracee_bytes, syscall6, UserRegs, EFAULT, EINVAL};
+use crate::supervisor::{
+    poke_tracee_bytes, replay_syscall, syscall6, UserRegs, EFAULT, EINVAL, SYS_PROCESS_VM_READV,
+};
 
 const BASE: u64 = 0x6000_0000_0000;
 const PAGE: u64 = 4096;
@@ -54,7 +56,7 @@ impl Pending {
         let remote = [regs.rdi as usize, size];
         let read = unsafe {
             syscall6(
-                310,
+                SYS_PROCESS_VM_READV,
                 pid,
                 local.as_ptr() as usize,
                 1,
@@ -150,8 +152,7 @@ impl Pending {
     }
     fn replay(&self, regs: &mut UserRegs, syscall: u64, args: [u64; 6]) {
         set_call(regs, syscall, args);
-        regs.rax = syscall;
-        regs.rip = self.rip - 2;
+        replay_syscall(regs, self.rip, syscall);
     }
     /// Returns whether the caller's clone3 is reissued instead of returning.
     pub fn restore(&mut self, regs: &mut UserRegs) -> bool {
@@ -162,8 +163,7 @@ impl Pending {
         // cleanup stage ran, so the kernel will not restart the call itself:
         // reissue the caller's clone3, which takes a fresh snapshot.
         if self.result == -513 {
-            regs.rip = self.rip - 2;
-            regs.rax = 435;
+            replay_syscall(regs, self.rip, 435);
             return true;
         }
         regs.rip = self.rip;

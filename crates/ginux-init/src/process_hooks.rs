@@ -14,7 +14,11 @@
 //! Signal handlers, job control, and PI futex operations are unsupported.
 //! These hooks do not enable process creation in configured `launch`.
 
-use crate::supervisor::{ENOSYS, EPERM, SYS_FORK};
+use crate::supervisor::{ENOSYS, EPERM};
+
+/// Instance `fork` entry, as an x86-64 number like every lane constant here.
+/// The daemon's own fork is [`crate::supervisor::host_fork`].
+pub const SYS_FORK: u64 = ginux_core::SYS_FORK;
 
 /// Raw clone entry: what glibc `fork()` and the `posix_spawn` fallback emit.
 pub const SYS_CLONE: u64 = 56;
@@ -161,7 +165,7 @@ pub const PTRACE_O_TRACEVFORK: usize = 1 << PTRACE_EVENT_VFORK;
 /// plus the two executable-replacement entries belong to the process lane.
 /// Other entries are handled directly by the supervision loop.
 pub const fn claims(syscall: u64) -> bool {
-    syscall == SYS_FORK as u64
+    syscall == SYS_FORK
         || syscall == SYS_CLONE
         || syscall == SYS_VFORK
         || syscall == SYS_EXECVE

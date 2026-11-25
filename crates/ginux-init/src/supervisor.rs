@@ -4,40 +4,22 @@
 //! supervisor console writers shared by every entry point. No workload policy
 //! lives here; dispatch decisions belong to `dispatch`.
 
-use core::arch::asm;
 use core::sync::atomic::{AtomicU8, Ordering};
 
-pub const SYS_WRITE_HOST: usize = 1;
-pub const SYS_READ_HOST: usize = 0;
-pub const SYS_CLOSE_HOST: usize = 3;
-pub const SYS_FSTAT: usize = 5;
-pub const SYS_RT_SIGPROCMASK: usize = 14;
-pub const SYS_PREAD64: usize = 17;
-pub const SYS_PWRITE64: usize = 18;
-pub const SYS_FSYNC: usize = 74;
-pub const SYS_CLOCK_GETTIME: usize = 228;
-pub const SYS_CHDIR: usize = 80;
-pub const SYS_SETGID: usize = 106;
-pub const SYS_SETUID: usize = 105;
-pub const SYS_SETGROUPS: usize = 116;
-pub const SYS_GETUID: usize = 102;
-pub const SYS_GETGID: usize = 104;
-pub const SYS_PRCTL: usize = 157;
-pub const SYS_CHROOT: usize = 161;
-pub const SYS_PAUSE: usize = 34;
-pub const SYS_FORK: usize = 57;
-pub const SYS_EXECVE: usize = 59;
-pub const SYS_EXIT_HOST: usize = 60;
-pub const SYS_WAIT4: usize = 61;
-pub const SYS_KILL: usize = 62;
-pub const SYS_PTRACE: usize = 101;
-pub const SYS_OPENAT_HOST: usize = 257;
-pub const SYS_MKDIRAT_HOST: usize = 258;
-pub const SYS_SIGNALFD4: usize = 289;
-pub const SYS_PROCESS_VM_WRITEV: usize = 311;
-pub const SYS_SECCOMP: usize = 317;
-pub const SYS_PIDFD_OPEN: usize = 434;
-pub const SYS_PIDFD_GETFD: usize = 438;
+pub use crate::arch::{
+    breakpoint_trap_word, host_fork, host_pause, host_poll, read_user_regs, replay_syscall,
+    stat_mode, syscall0, syscall1, syscall2, syscall3, syscall4, syscall5, syscall6,
+    write_user_regs, ABI_REJECT_LAUNCH, ABI_REJECT_NATIVE, ABI_REJECT_PROCESS, ARCH_NAME,
+    AUDIT_ARCH, O_DIRECTORY_HOST, SECCOMP_YIELD_NUMBER, SYS_BIND_HOST, SYS_CHDIR, SYS_CHROOT,
+    SYS_CLOCK_GETTIME, SYS_CLOSE_HOST, SYS_CLOSE_RANGE_HOST, SYS_EXECVE, SYS_EXIT_HOST,
+    SYS_FCNTL_HOST, SYS_FSTAT, SYS_FSYNC, SYS_FUTEX_HOST, SYS_GETDENTS64_HOST, SYS_GETGID,
+    SYS_GETPID_HOST, SYS_GETUID, SYS_IOCTL_HOST, SYS_KILL, SYS_LINKAT_HOST, SYS_MKDIRAT_HOST,
+    SYS_MMAP_HOST, SYS_NEWFSTATAT_HOST, SYS_OPENAT_HOST, SYS_PIDFD_GETFD, SYS_PIDFD_OPEN,
+    SYS_PRCTL, SYS_PREAD64, SYS_PROCESS_VM_READV, SYS_PROCESS_VM_WRITEV, SYS_PTRACE, SYS_PWRITE64,
+    SYS_READLINKAT_HOST, SYS_READ_HOST, SYS_RT_SIGACTION_HOST, SYS_RT_SIGPROCMASK,
+    SYS_SCHED_SETAFFINITY_HOST, SYS_SECCOMP, SYS_SETGID, SYS_SETGROUPS, SYS_SETRLIMIT_HOST,
+    SYS_SETUID, SYS_SIGNALFD4, SYS_WAIT4, SYS_WRITE_HOST,
+};
 pub const AT_FDCWD: usize = (-100isize) as usize;
 pub const O_RDONLY: usize = 0;
 pub const O_RDWR: usize = 2;
@@ -50,9 +32,12 @@ pub const PTRACE_POKETEXT: usize = 4;
 pub const PTRACE_CONT: usize = 7;
 pub const PTRACE_PEEKDATA: usize = 2;
 pub const PTRACE_KILL: usize = 8;
+#[cfg_attr(target_arch = "aarch64", allow(dead_code))]
 pub const PTRACE_GETREGS: usize = 12;
+#[cfg_attr(target_arch = "aarch64", allow(dead_code))]
 pub const PTRACE_SETREGS: usize = 13;
 pub const PTRACE_SYSCALL: usize = 24;
+#[cfg_attr(target_arch = "aarch64", allow(dead_code))]
 pub const PTRACE_SYSEMU: usize = 31;
 pub const PTRACE_SETOPTIONS: usize = 0x4200;
 pub const PTRACE_GETEVENTMSG: usize = 0x4201;
@@ -75,6 +60,7 @@ pub const EACCES: i64 = 13;
 pub const EINVAL: i64 = 22;
 pub const EMFILE: i64 = 24;
 pub const ENOSYS: i64 = 38;
+#[cfg_attr(target_arch = "aarch64", allow(dead_code))]
 pub const VIRTUAL_PID: u64 = 4242;
 pub const SIG_BLOCK: usize = 0;
 pub const SIGINT: usize = 2;
@@ -123,7 +109,6 @@ pub fn install_trace_filter(direct_yield: bool) -> isize {
     const BPF_LD_W_ABS: u16 = 0x20;
     const BPF_JMP_JEQ_K: u16 = 0x15;
     const BPF_RET_K: u16 = 0x06;
-    const AUDIT_ARCH_X86_64: u32 = 0xc000_003e;
     const INVALID_ARCH_DATA: u32 = 0xffff;
     let yield_action = if direct_yield {
         SECCOMP_RET_ALLOW
@@ -141,7 +126,7 @@ pub fn install_trace_filter(direct_yield: bool) -> isize {
             code: BPF_JMP_JEQ_K,
             jt: 1,
             jf: 0,
-            k: AUDIT_ARCH_X86_64,
+            k: AUDIT_ARCH,
         },
         SockFilter {
             code: BPF_RET_K,
@@ -159,7 +144,7 @@ pub fn install_trace_filter(direct_yield: bool) -> isize {
             code: BPF_JMP_JEQ_K,
             jt: 0,
             jf: 1,
-            k: 24,
+            k: SECCOMP_YIELD_NUMBER,
         },
         SockFilter {
             code: BPF_RET_K,
@@ -257,6 +242,7 @@ pub fn ptrace(request: usize, pid: usize, addr: usize, data: usize) -> isize {
     unsafe { syscall4(SYS_PTRACE, request, pid, addr, data) }
 }
 
+#[cfg_attr(target_arch = "aarch64", allow(dead_code))]
 pub fn read_tracee_word(pid: usize, address: usize) -> bool {
     let mut word = 0u64;
     ptrace(PTRACE_PEEKDATA, pid, address, &mut word as *mut _ as usize) >= 0
@@ -391,10 +377,9 @@ pub fn standard_stream_refusal() -> Option<&'static [u8]> {
         ],
     ];
     (0..3).find_map(|fd| {
-        // x86_64 struct stat: st_mode is the u32 at byte offset 24.
         let mut stat = [0u64; 18];
         match unsafe { syscall2(SYS_FSTAT, fd, stat.as_mut_ptr() as usize) } {
-            0 if stat[3] & S_IFMT == S_IFDIR => Some(REFUSALS[fd][0]),
+            0 if stat_mode(&stat) & S_IFMT == S_IFDIR => Some(REFUSALS[fd][0]),
             0 => None,
             error if error == -(EBADF as isize) => None,
             _ => Some(REFUSALS[fd][1]),
@@ -404,7 +389,8 @@ pub fn standard_stream_refusal() -> Option<&'static [u8]> {
 
 /// Stable object identity for an already-open host descriptor. Future
 /// filesystem operation gates authorize against this identity rather than
-/// reopening a pathname. The layout is the Linux x86-64 `struct stat` ABI.
+/// reopening a pathname. `st_dev` and `st_ino` are the first two words of
+/// `struct stat` on both supported architectures.
 pub fn descriptor_object_id(fd: usize) -> Option<ginux_fs_policy::ObjectId> {
     let mut stat = [0u64; 18];
     if unsafe { syscall2(SYS_FSTAT, fd, stat.as_mut_ptr() as usize) } != 0 {
@@ -469,131 +455,4 @@ pub fn exit_process(code: usize) -> ! {
     loop {
         core::hint::spin_loop();
     }
-}
-
-#[inline(always)]
-pub unsafe fn syscall0(number: usize) -> isize {
-    let result: isize;
-    asm!(
-        "syscall",
-        inlateout("rax") number as isize => result,
-        lateout("rcx") _,
-        lateout("r11") _,
-        options(nostack)
-    );
-    result
-}
-
-#[inline(always)]
-pub unsafe fn syscall1(number: usize, a1: usize) -> isize {
-    let result: isize;
-    asm!(
-        "syscall",
-        inlateout("rax") number as isize => result,
-        in("rdi") a1,
-        lateout("rcx") _,
-        lateout("r11") _,
-        options(nostack)
-    );
-    result
-}
-
-#[inline(always)]
-pub unsafe fn syscall2(number: usize, a1: usize, a2: usize) -> isize {
-    let result: isize;
-    asm!(
-        "syscall",
-        inlateout("rax") number as isize => result,
-        in("rdi") a1,
-        in("rsi") a2,
-        lateout("rcx") _,
-        lateout("r11") _,
-        options(nostack)
-    );
-    result
-}
-
-#[inline(always)]
-pub unsafe fn syscall3(number: usize, a1: usize, a2: usize, a3: usize) -> isize {
-    let result: isize;
-    asm!(
-        "syscall",
-        inlateout("rax") number as isize => result,
-        in("rdi") a1,
-        in("rsi") a2,
-        in("rdx") a3,
-        lateout("rcx") _,
-        lateout("r11") _,
-        options(nostack)
-    );
-    result
-}
-
-#[inline(always)]
-pub unsafe fn syscall4(number: usize, a1: usize, a2: usize, a3: usize, a4: usize) -> isize {
-    let result: isize;
-    asm!(
-        "syscall",
-        inlateout("rax") number as isize => result,
-        in("rdi") a1,
-        in("rsi") a2,
-        in("rdx") a3,
-        in("r10") a4,
-        lateout("rcx") _,
-        lateout("r11") _,
-        options(nostack)
-    );
-    result
-}
-
-#[inline(always)]
-pub unsafe fn syscall5(
-    number: usize,
-    a1: usize,
-    a2: usize,
-    a3: usize,
-    a4: usize,
-    a5: usize,
-) -> isize {
-    let result: isize;
-    asm!(
-        "syscall",
-        inlateout("rax") number as isize => result,
-        in("rdi") a1,
-        in("rsi") a2,
-        in("rdx") a3,
-        in("r10") a4,
-        in("r8") a5,
-        lateout("rcx") _,
-        lateout("r11") _,
-        options(nostack)
-    );
-    result
-}
-
-#[inline(always)]
-pub unsafe fn syscall6(
-    number: usize,
-    a1: usize,
-    a2: usize,
-    a3: usize,
-    a4: usize,
-    a5: usize,
-    a6: usize,
-) -> isize {
-    let result: isize;
-    asm!(
-        "syscall",
-        inlateout("rax") number as isize => result,
-        in("rdi") a1,
-        in("rsi") a2,
-        in("rdx") a3,
-        in("r10") a4,
-        in("r8") a5,
-        in("r9") a6,
-        lateout("rcx") _,
-        lateout("r11") _,
-        options(nostack)
-    );
-    result
 }

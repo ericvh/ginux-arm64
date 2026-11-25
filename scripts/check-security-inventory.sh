@@ -14,6 +14,8 @@ rg -l '\bunsafe[[:space:]]*(\{|fn|impl|trait|extern)' crates --glob '*.rs' \
 cat >"$temporary.allowed" <<'EOF'
 crates/baseline-runner/src/main.rs
 crates/ginux-allocator/src/lib.rs
+crates/ginux-init/src/arch/aarch64.rs
+crates/ginux-init/src/arch/x86_64.rs
 crates/ginux-init/src/launch.rs
 crates/ginux-init/src/main.rs
 crates/ginux-init/src/native_clone.rs

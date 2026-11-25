@@ -24,11 +24,12 @@ use crate::dispatch::{
     balanced_surface_name, decide_native, native_arguments_allowed, NativeDecision,
 };
 use crate::supervisor::{
-    exit_process, line, managed_host_identity, ptrace, standard_stream_refusal, stopped, syscall0,
-    syscall1, syscall2, syscall3, syscall4, syscall5, virtual_sysinfo, wait, write_all,
-    write_tracee_bytes, UserRegs, AT_FDCWD, O_RDONLY, PR_SET_NO_NEW_PRIVS, PTRACE_GETREGS,
-    PTRACE_O_EXITKILL, PTRACE_O_TRACESYSGOOD, PTRACE_SETOPTIONS, PTRACE_SETREGS, PTRACE_SYSCALL,
-    PTRACE_TRACEME, SYS_CHDIR, SYS_CHROOT, SYS_CLOSE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FORK,
+    exit_process, host_fork, line, managed_host_identity, ptrace, read_user_regs,
+    standard_stream_refusal, stopped, syscall1, syscall2, syscall3, syscall4, syscall5,
+    virtual_sysinfo, wait, write_all, write_tracee_bytes, write_user_regs, UserRegs,
+    ABI_REJECT_LAUNCH, AT_FDCWD, AUDIT_ARCH, O_RDONLY, PR_SET_NO_NEW_PRIVS, PTRACE_O_EXITKILL,
+    PTRACE_O_TRACESYSGOOD, PTRACE_SETOPTIONS, PTRACE_SYSCALL, PTRACE_TRACEME, SYS_CHDIR,
+    SYS_CHROOT, SYS_CLOSE_HOST, SYS_CLOSE_RANGE_HOST, SYS_EXECVE, SYS_EXIT_HOST, SYS_FCNTL_HOST,
     SYS_FSYNC, SYS_MKDIRAT_HOST, SYS_OPENAT_HOST, SYS_PRCTL, SYS_PTRACE, SYS_READ_HOST, SYS_SETGID,
     SYS_SETGROUPS, SYS_SETUID, SYS_WRITE_HOST,
 };
@@ -64,6 +65,7 @@ pub enum Command {
     KernelViews(*const u8),
     Launch(*const u8, *const u8, *const u8),
     LaunchUsage,
+    Arch,
     Usage,
 }
 
@@ -75,6 +77,9 @@ pub fn parse_argv(argc: usize, argv: *const usize) -> Option<Command> {
         return None;
     }
     let command = unsafe { *argv.add(1) as *const u8 };
+    if argc == 2 && c_string_equals(command, b"arch") {
+        return Some(Command::Arch);
+    }
     if c_string_equals(command, b"launch") && argc < 4 {
         return Some(Command::LaunchUsage);
     }
@@ -399,7 +404,7 @@ pub fn launch_main(config_path: *const u8, root_path: *const u8, result_path: *c
         launch_instance_fail(&mut instance, b"invalid launch start transition");
     }
     stage_launch(&config);
-    let child = unsafe { syscall0(SYS_FORK) };
+    let child = host_fork();
     if child < 0 {
         launch_instance_fail(&mut instance, b"launch tracee fork failed");
     }
@@ -646,9 +651,9 @@ fn stage_result_path(path: *const u8) {
     }
     if descriptor < 3 {
         // Keep the result separate from even closed stdin/stdout/stderr.
-        const SYS_FCNTL: usize = 72;
         const F_DUPFD_CLOEXEC: usize = 1030;
-        let duplicate = unsafe { syscall3(SYS_FCNTL, descriptor as usize, F_DUPFD_CLOEXEC, 3) };
+        let duplicate =
+            unsafe { syscall3(SYS_FCNTL_HOST, descriptor as usize, F_DUPFD_CLOEXEC, 3) };
         let _ = unsafe { syscall1(SYS_CLOSE_HOST, descriptor as usize) };
         if duplicate < 0 {
             launch_startup_fail(b"result-file descriptor reservation failed");
@@ -750,6 +755,7 @@ pub fn usage() -> ! {
     line_stderr(b"ginux: usage: ginux device-bench <config> <block> <kind>");
     line_stderr(b"ginux: usage: ginux vfs <config> <rootfs> <index>");
     line_stderr(b"ginux: usage: ginux launch <config> <root> [--result-file <fresh host path>]");
+    line_stderr(b"ginux: usage: ginux arch");
     exit_process(2)
 }
 
@@ -964,8 +970,7 @@ fn launch_tracee(root_path: *const u8) -> ! {
     static ROOT: &[u8] = b"/\0";
     // Host descriptors (including the result file) must not grant the
     // workload authority outside the supplied root. Only stdio is shared.
-    const SYS_CLOSE_RANGE: usize = 436;
-    if unsafe { syscall3(SYS_CLOSE_RANGE, 3, u32::MAX as usize, 0) } < 0 {
+    if unsafe { syscall3(SYS_CLOSE_RANGE_HOST, 3, u32::MAX as usize, 0) } < 0 {
         tracee_setup_fail(
             b"ginux: launch bootstrap failed: descriptor cleanup failed\n",
             129,
@@ -1130,7 +1135,7 @@ fn supervise_launch(pid: usize, instance: &mut Instance, contract: &EffectiveCon
             launch_fail(instance, pid, b"launch tracee escaped supervision");
         }
         let mut registers = core::mem::MaybeUninit::<UserRegs>::uninit();
-        if ptrace(PTRACE_GETREGS, pid, 0, registers.as_mut_ptr() as usize) < 0 {
+        if read_user_regs(pid, 0, registers.as_mut_ptr() as usize) < 0 {
             launch_fail(instance, pid, b"launch register read failed");
         }
         let mut registers = unsafe { registers.assume_init() };
@@ -1138,7 +1143,7 @@ fn supervise_launch(pid: usize, instance: &mut Instance, contract: &EffectiveCon
         if awaiting_exit {
             if override_exit {
                 registers.rax = override_result as u64;
-                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0 {
+                if write_user_regs(pid, 0, &registers as *const _ as usize) < 0 {
                     launch_fail(instance, pid, b"launch result override failed");
                 }
             }
@@ -1166,9 +1171,9 @@ fn supervise_launch(pid: usize, instance: &mut Instance, contract: &EffectiveCon
             syscall_info.as_mut_ptr() as usize,
         ) < 24
             || syscall_info[0] as u8 != 1
-            || (syscall_info[0] >> 32) as u32 != 0xc000003e
+            || (syscall_info[0] >> 32) as u32 != AUDIT_ARCH
         {
-            launch_fail(instance, pid, b"launch requires the x86-64 syscall ABI");
+            launch_fail(instance, pid, ABI_REJECT_LAUNCH);
         }
         sequence += 1;
         let syscall = registers.orig_rax;
@@ -1179,13 +1184,13 @@ fn supervise_launch(pid: usize, instance: &mut Instance, contract: &EffectiveCon
         };
         if transfer_limit.is_some_and(|limit| registers.rdx > limit) {
             registers.rdx = transfer_limit.unwrap_or(registers.rdx);
-            if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0 {
+            if write_user_regs(pid, 0, &registers as *const _ as usize) < 0 {
                 launch_fail(instance, pid, b"launch transfer clamp failed");
             }
         }
         if syscall == 318 && registers.rsi > 256 {
             registers.rsi = 256;
-            if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0 {
+            if write_user_regs(pid, 0, &registers as *const _ as usize) < 0 {
                 launch_fail(instance, pid, b"launch getrandom clamp failed");
             }
         }
@@ -1252,7 +1257,7 @@ fn supervise_launch(pid: usize, instance: &mut Instance, contract: &EffectiveCon
                 awaiting_exit = true;
                 override_exit = true;
                 override_result = result;
-                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                if write_user_regs(pid, 0, &registers as *const _ as usize) < 0
                     || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
                 {
                     launch_fail(instance, pid, b"launch lane emulation failed");
@@ -1276,7 +1281,7 @@ fn supervise_launch(pid: usize, instance: &mut Instance, contract: &EffectiveCon
                 awaiting_exit = true;
                 override_exit = true;
                 override_result = result;
-                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                if write_user_regs(pid, 0, &registers as *const _ as usize) < 0
                     || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
                 {
                     launch_fail(instance, pid, b"launch getpid emulation failed");
@@ -1303,7 +1308,7 @@ fn supervise_launch(pid: usize, instance: &mut Instance, contract: &EffectiveCon
                 awaiting_exit = true;
                 override_exit = true;
                 override_result = result;
-                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                if write_user_regs(pid, 0, &registers as *const _ as usize) < 0
                     || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
                 {
                     launch_fail(instance, pid, b"launch sysinfo emulation failed");
@@ -1329,7 +1334,7 @@ fn supervise_launch(pid: usize, instance: &mut Instance, contract: &EffectiveCon
                 awaiting_exit = true;
                 override_exit = true;
                 override_result = -1;
-                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                if write_user_regs(pid, 0, &registers as *const _ as usize) < 0
                     || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
                 {
                     launch_fail(instance, pid, b"launch argument denial failed");
@@ -1343,7 +1348,7 @@ fn supervise_launch(pid: usize, instance: &mut Instance, contract: &EffectiveCon
                 awaiting_exit = true;
                 override_exit = true;
                 override_result = -(errno as i64);
-                if ptrace(PTRACE_SETREGS, pid, 0, &registers as *const _ as usize) < 0
+                if write_user_regs(pid, 0, &registers as *const _ as usize) < 0
                     || ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0
                 {
                     launch_fail(instance, pid, b"launch syscall denial failed");

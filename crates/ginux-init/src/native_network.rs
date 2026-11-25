@@ -6,7 +6,10 @@
 //! bounded sendmsg calls because Linux writes `msg_len` into the caller's
 //! array.
 
-use crate::supervisor::{poke_tracee_bytes, syscall6, UserRegs, EFAULT, EINVAL, EPERM};
+use crate::supervisor::{
+    poke_tracee_bytes, replay_syscall, syscall6, UserRegs, EFAULT, EINVAL, EPERM,
+    SYS_PROCESS_VM_READV,
+};
 
 const BASE: u64 = 0x6100_0000_0000;
 const SNAPSHOT_SIZE: usize = 16 * 1024;
@@ -135,7 +138,7 @@ impl Buffer {
         let remote = [address as usize, size];
         let read = unsafe {
             syscall6(
-                310,
+                SYS_PROCESS_VM_READV,
                 pid,
                 local.as_ptr() as usize,
                 1,
@@ -456,8 +459,7 @@ impl Pending {
         set_call(regs, self.original_syscall, self.original);
         self.phase = Phase::Idle;
         if matches!(self.result, -512 | -513 | -514 | -516) {
-            regs.rip = self.rip - 2;
-            regs.rax = self.original_syscall;
+            replay_syscall(regs, self.rip, self.original_syscall);
             return true;
         }
         regs.rip = self.rip;
@@ -476,8 +478,7 @@ impl Pending {
 
     fn replay(&self, regs: &mut UserRegs, syscall: u64, args: [u64; 6]) {
         set_call(regs, syscall, args);
-        regs.rax = syscall;
-        regs.rip = self.rip - 2;
+        replay_syscall(regs, self.rip, syscall);
     }
 }
 
