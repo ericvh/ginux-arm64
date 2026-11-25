@@ -205,10 +205,28 @@ stage the arm64 root filesystem themselves, so those files work unchanged.
 A recipe meant to pull its own image on an aarch64 host has to name the
 arm64 manifest or the index.
 
-The Rocky-host targets not covered are the RPM (`test-rpm`,
-`test-gate19-native-examples`, `run-host`), the allocator, the benchmarks,
-`test-systemd-live`, and `test-systemd-interactive`. They still copy or
-build x86_64 artifacts.
+### The package
+
+```sh
+ROCKY_ARCH=aarch64 make rpm        # builds in the Rocky aarch64 guest
+ROCKY_ARCH=aarch64 make test-rpm   # installs it in a fresh one and uses it
+```
+
+The spec builds the runtime for the package's own architecture. The build
+runs inside the emulated guest and takes about an hour there.
+
+The example recipes name each image by its `linux/amd64` manifest.
+`config/examples/arm64-manifests` lists the `linux/arm64` manifest of each
+image from the same index, and the aarch64 package installs the recipes
+with those, so `ginux import` of a packaged recipe fetches an image the
+host can run. `docker.io/jrei/systemd-ubuntu`, which
+`ubuntu24-network-service.toml` uses, is published for `linux/amd64` only:
+that recipe has no arm64 image, and `test-rpm` runs its Ubuntu step on
+x86_64 only. The recipes in the tree are upstream's, unchanged.
+
+The Rocky-host targets not covered are the benchmarks,
+`test-allocator-rocky`, `test-gate19-native-examples`, `run-host`,
+`test-systemd-live`, and `test-systemd-interactive`.
 
 The original branch for this (`cursor/arm64-rocky-guest-2b05`) made
 `make test` itself boot the aarch64 guest and copied the binaries from a
@@ -352,6 +370,15 @@ under `qemu-system-aarch64`:
   login, the dnf-failure case, the startup-failure case, shutdown), and
   `test-multi-instance`.
 
+- `ROCKY_ARCH=aarch64 make rpm` and `make test-rpm`: the package builds
+  (rpmlint reports no errors, and the allocator's conformance program
+  passes in the package's check step), installs, and passes upstream's
+  lifecycle test. That test verifies the package, imports the Alpine and
+  Rocky recipes, pulling their arm64 images, starts and stops them, boots
+  the packaged Rocky systemd recipe to a login, runs a Rocky workload with
+  the packaged allocator preloaded, imports from the cache with networking
+  off, and reinstalls and erases the package.
+
 In the minimal guest with the v9fs `kernel-v7.4-rc1` image:
 `gate1-aarch64-guest`, `native-aarch64-guest`, and
 `integration-aarch64-guest`.
@@ -368,20 +395,22 @@ What still separates the aarch64 daemon from the x86_64 one:
 - **Upstream does not support it.** The approved target is x86-64. Nothing
   here has been reviewed by upstream or accepted by a human reviewer.
 - **Hardware.** Only the integration tests have run on arm64 hardware (the
-  CI runner). The Rocky host suite and every instance test, systemd
-  included, have run only under emulation on an x86_64 machine.
+  CI runner). The Rocky host suite, every instance test, systemd included,
+  and the package have run only under emulation on an x86_64 machine.
 - **Speed.** Not measured on hardware. Under emulation a systemd instance
   reached its login in about 95 seconds on the aarch64 host and 28 on the
   x86_64 one; the two emulations are not comparable, so this says little.
   The aarch64 register translation spends six `ptrace` requests on a call
   with both stops, x86-64 four.
 - **Not run on aarch64:** the benchmarks, `test-allocator-rocky`,
-  `test-systemd-live` (needs outside network from the guest),
-  `test-systemd-interactive`, `test-gate19-native-examples`, and `run-host`.
-  All but the first need the RPM.
-- **Recipes name amd64 images.** `config/examples/*.toml` and the instance
-  configs name their root by the amd64 manifest. A recipe that pulls its own
-  image on an aarch64 host has to name the arm64 manifest or the index.
+  `test-systemd-live`, `test-systemd-interactive` (its checks name
+  `x86_64` in `/proc/version`), `test-gate19-native-examples`, `run-host`,
+  and `test-rpm-metadata` (it needs `rpm` on the build machine, which this
+  one lacks).
+- **Recipes in the tree name amd64 images.** The aarch64 package installs
+  them naming arm64 ones. A recipe used straight from the tree on an
+  aarch64 host has to be given the arm64 manifest from
+  `config/examples/arm64-manifests`. The Ubuntu example has no arm64 image.
 - **Checks that cannot be the same.** `int80` does not exist. The `kill`
   and `pidfd_open` selector checks pass by construction (see the
   integration tests). `test-runtime` and `test-instance` interpret the

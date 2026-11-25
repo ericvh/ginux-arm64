@@ -56,6 +56,8 @@ daemon.
 | The index tool required the x86-64 loader path in a root filesystem. No aarch64 root could be prepared. | `make systemd-image-prepare` | Accepts either architecture's loader. |
 | The image puller and `ensure-oci-image.sh` selected the `linux/amd64` manifest on every host. | Reading the code | Select the host's platform. |
 | The RPM spec named the x86_64 target triple. | Reading the spec | Takes the triple from the build architecture. |
+| The daemon did not link with Rocky's Rust toolchain on aarch64: its `compiler_builtins` carries a C routine built with the stack protector, and the freestanding daemon has no C library to supply the protector's symbols. | `ROCKY_ARCH=aarch64 make rpm` | The architecture layer supplies them. |
+| The packaged recipes named `linux/amd64` images, which an aarch64 host cannot run. | Reading `rpm-test-guest.sh` before running it | The aarch64 package installs them naming the `linux/arm64` manifests of the same indexes. |
 | The VFS probe reported the instance shell as an x86-64 ELF whatever it read. | `test-vfs` | Reports the machine it read. |
 | Launch treated `getcpu` and `time` as answered by the vDSO. aarch64's vDSO has neither, so a contract could not deny `getcpu`. | Code audit | The list is per architecture. |
 
@@ -87,6 +89,7 @@ the x86-64 architecture.
 | The same, on a distribution kernel | Rocky 10.2 aarch64 guest, kernel 6.12 (`make test-arm64`) | the same counts; the main supervision script alone has 42 |
 | Upstream's Rocky host suite still passes | the same guest (`make test-arm64`) | `test-image` 8/8, `test-intercept`, `test-runtime`, `test-config`, `test-instance`, `test-gate12-cli`, `test-devices`, `test-process`, `test-kernel-views` |
 | Upstream's instance tests pass | the same guest (`make test-instances-arm64`) | `test-vfs`, `test-native-vfs`, `test-contract-runtime`, `test-gate125-lock`, `test-gate975-hooks`, `test-gate975-network`, `test-systemd`, `test-multi-instance` |
+| The package builds and passes upstream's lifecycle test | Rocky 10.2 aarch64 guests (`ROCKY_ARCH=aarch64 make rpm`, `make test-rpm`) | `Rocky Linux RPM build: PASS`, rpmlint 0 errors; `rpm-test-guest: PASS`, `Rocky Linux RPM lifecycle: PASS` |
 | The workspace's unit tests and the allocator pass on an arm64 host | the CI runner | `make test-unit`, `test-allocator`, `test-allocator-linux` |
 | The x86_64 fixtures are the same programs | compile upstream's files and these with the Makefile's flags, `cmp` | 38 binaries identical |
 | The x86_64 daemon is unchanged in result | this x86_64 machine, and the `launch-integration` CI job | `make check`; `test-unit` 174 passed; `test-launch` 69, `test-native-supervision` 57, `test-gate1-setup` 3, `test-tracee-kill` 5, `test-process-native` 48 |
@@ -97,9 +100,10 @@ the x86-64 architecture.
 - The Rocky guests are emulated on an x86_64 machine. Nothing but the
   integration tests, the unit tests and the allocator has run on arm64
   hardware.
-- The aarch64 RPM was attempted in the emulated guest. The first attempt
-  found the link fault recorded in `docs/arm64/README.md` and its fix; see
-  that file for whether a package has since been built.
+- The package was built and tested in emulated guests only.
+  `test-rpm-metadata` was not run: it needs `rpm` on the build machine.
+  The Ubuntu step of the lifecycle test does not run on aarch64, because
+  its image has no arm64 build.
 - In the Rocky x86_64 guest, one check of `test-native-supervision`
   ("shared descriptor mutations are serialized") fails. It allows a sibling
   thread one million spin iterations to reach a blocked call, which is not

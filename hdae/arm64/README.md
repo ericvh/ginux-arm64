@@ -86,5 +86,5 @@ rebased under it.
 ## Next gate, if the track continues
 
 What A8 left is in the "Known gaps" of `docs/arm64/README.md`. The items
-that need a machine this track has not had: the instance tests and a
-benchmark on arm64 hardware, and an aarch64 RPM built and installed there.
+that need a machine this track has not had: the instance tests, the
+package, and a benchmark on arm64 hardware.
