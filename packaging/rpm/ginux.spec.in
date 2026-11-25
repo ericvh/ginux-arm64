@@ -80,6 +80,13 @@ install -D -m 0755 scripts/ginux-host-instance-helper.sh \
     %{buildroot}%{_libexecdir}/ginux/ginux-helper
 install -d -m 0755 %{buildroot}%{_sysconfdir}/ginux/examples
 install -m 0644 config/examples/*.toml %{buildroot}%{_sysconfdir}/ginux/examples/
+%ifarch aarch64
+# The recipes name linux/amd64 image manifests. This package runs them on
+# aarch64, so it names the linux/arm64 manifests of the same images.
+grep '^sha256:' config/examples/arm64-manifests | while read -r amd64 arm64 image; do
+    sed -i "s/$amd64/$arm64/" %{buildroot}%{_sysconfdir}/ginux/examples/*.toml
+done
+%endif
 install -D -m 0644 %{SOURCE2} %{buildroot}%{_tmpfilesdir}/ginux.conf
 install -d -m 0755 %{buildroot}%{_docdir}/ginux
 install -m 0644 README.md NOTICE docs/cli-command-model.md \

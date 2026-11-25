@@ -1,0 +1,10 @@
+# The recipes in this directory name each image by its linux/amd64 manifest.
+# These are the linux/arm64 manifests of the same images, from the same
+# image indexes. The aarch64 package installs the recipes with them.
+#
+# amd64 manifest, arm64 manifest, image
+sha256:7a18ce2c9c1e0d8735f3e72685f9666150af25036e7f7b5ee4eede3754496f8c sha256:ab553c2b75598574961436db141b52901a695bfce3e496c68d8ed538880663ec docker.io/rockylinux/rockylinux:10-ubi-init
+sha256:9db2934886712d877c932e07249c75a59e6ca27adfbccc05261987a17bef2d63 sha256:e233f2058b0628266762f745a2c17e623b418e0090f47d223909d1f9a7d4367e docker.io/library/alpine:3.22
+#
+# docker.io/jrei/systemd-ubuntu:24.04 is published for linux/amd64 only.
+# ubuntu24-network-service.toml has no arm64 image to name.
