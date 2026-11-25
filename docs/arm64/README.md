@@ -141,6 +141,15 @@ The host needs `qemu-system-aarch64`, Arm UEFI firmware (`qemu-efi-aarch64`;
 `GINUX_AAVMF_DIR` names its directory when it is not `/usr/share/AAVMF`),
 `xorriso` or `genisoimage`, and Docker for the image test.
 
+On an arm64 machine with `/dev/kvm`, `ROCKY_ACCEL=kvm` runs the guest on the
+machine's own CPU instead of emulating it. The suite then takes minutes, not
+the better part of an hour, and the time limits need no stretching:
+
+```sh
+ROCKY_ACCEL=kvm make test-arm64
+ROCKY_ACCEL=kvm make test-instances-arm64 GINUX_EXPECT_TIME_SCALE=1
+```
+
 `ROCKY_ARCH` selects the guest. It defaults to `x86_64`, where every script
 does what upstream's does. With `ROCKY_ARCH=aarch64`:
 
@@ -330,6 +339,32 @@ the supervisor marks the call skipped before it writes the registers.
 `ginux runtime` interprets ELF64 for either machine. An aarch64 entry point
 must be 4-byte aligned.
 
+### A tracee's own trap
+
+x86-64 has `int3` for a breakpoint and `ud2` or `hlt` for a program that
+aborts, and they raise different signals. The native loop fails the
+instance at a tracee's `SIGTRAP` and delivers its `SIGILL` or `SIGSEGV`.
+aarch64 has one trap instruction, `brk`, and every form raises `SIGTRAP`:
+`brk #0` is the breakpoint, and the other immediates are how programs abort
+(`brk #1000` from GCC's `__builtin_trap` and glibc's `abort`, `brk #1` from
+LLVM). So on aarch64 a `brk #0` fails the instance, as `int3` does, and a
+`brk` with any other immediate is delivered to the tracee as the `SIGTRAP`
+the kernel raised.
+
+This matters because the contract has no `tgkill`: glibc's `abort()` cannot
+raise `SIGABRT` in an instance and falls back to its trap instruction, on
+both architectures. The process then dies of `SIGSEGV` on x86-64 and of
+`SIGTRAP` on aarch64. Before this rule it took the whole instance with it
+on aarch64.
+
+### Page size
+
+arm64 kernels run with 4K, 16K, or 64K pages. The daemon and the C fixtures
+are linked for 64K. The aarch64 managed payload is too: it was linked for
+4K while the daemon interpreted it, and faulted when a 16K-page kernel
+loaded it. The process fixture reads the page size from the auxiliary
+vector where it needs the end of a page.
+
 ### What a tracer of the daemon sees
 
 Upstream's race tests ptrace the daemon and read the registers it stages for
@@ -345,43 +380,41 @@ x86-64 (see the tests below).
 
 On upstream `85d53265` (pull request #334).
 
-Directly on GitHub's `ubuntu-24.04-arm` runner, in the `aarch64` CI job:
+**On arm64 hardware.** An Apple M1 running Fedora Asahi Remix 40, kernel
+6.14 with 16K pages, SELinux enforcing:
 
-- `make check-arm64`, the arch smoke test, the legacy-kernel boot, and the
-  two guest tests.
-- `test-launch` (68 checks; the x86_64 run has 69, the extra one being
-  `int80`), all eight `test-native-supervision` scripts (57 checks),
-  `test-gate1-setup` (3), `test-tracee-kill` (5), and `test-process-native`
-  (48). These are the counts of the x86_64 job.
-- `make test-unit` (every unit test of the workspace, built for and run on
-  the arm64 host), `test-allocator`, and `test-allocator-linux` (the
-  allocator library preloaded into its conformance and benchmark programs).
-
-On an x86_64 machine, in the Rocky Linux 10.2 aarch64 guest (kernel 6.12)
-under `qemu-system-aarch64`:
-
-- `make test-arm64`: `test-image` 8/8; `test-intercept`, `test-runtime`,
-  `test-config`, `test-instance`, `test-gate12-cli`, `test-devices`,
-  `test-process`, `test-kernel-views`; then the twelve integration scripts
-  above as root.
-- `make test-instances-arm64`: `test-vfs`, `test-native-vfs`,
-  `test-contract-runtime`, `test-gate125-lock`, `test-gate975-hooks`,
-  `test-gate975-network`, `test-systemd` (cold, warm, and repeat boots to a
-  login, the dnf-failure case, the startup-failure case, shutdown), and
+- Natively: `make check-arm64`, the arch smoke test, `test-launch` (68
+  checks), all eight `test-native-supervision` scripts (57),
+  `test-gate1-setup` (3), `test-tracee-kill` (5), `test-process-native`
+  (48), `make test-unit`, and `test-allocator-linux`.
+- In the Rocky Linux 10.2 aarch64 guest under KVM (kernel 6.12, 4K pages):
+  `make test-arm64` in 145 seconds and `make test-instances-arm64` in 261
+  seconds, both at upstream's own time limits. That is `test-image`, the
+  host suite, the twelve integration scripts, `test-vfs`,
+  `test-native-vfs`, `test-contract-runtime`, `test-gate125-lock`,
+  `test-gate975-hooks`, `test-gate975-network`, `test-systemd`, and
   `test-multi-instance`.
+- `ROCKY_ARCH=aarch64 ROCKY_ACCEL=kvm make rpm` builds the package in 164
+  seconds, and `test-rpm-metadata` passes on it. `make test-rpm` passes up
+  to the step described under "Upstream defects this work ran into" and
+  fails there, as the x86_64 package does under KVM.
+- A systemd instance reached its login in 3.3 seconds there. On an x86_64
+  machine (AMD Threadripper 1950X) with the Rocky x86_64 guest under KVM it
+  took 3.4 and 3.9 seconds. The machines differ, so this compares nothing
+  finer than the order of magnitude.
 
-- `ROCKY_ARCH=aarch64 make rpm` and `make test-rpm`: the package builds
-  (rpmlint reports no errors, and the allocator's conformance program
-  passes in the package's check step), installs, and passes upstream's
-  lifecycle test. That test verifies the package, imports the Alpine and
-  Rocky recipes, pulling their arm64 images, starts and stops them, boots
-  the packaged Rocky systemd recipe to a login, runs a Rocky workload with
-  the packaged allocator preloaded, imports from the cache with networking
-  off, and reinstalls and erases the package.
+**On GitHub's `ubuntu-24.04-arm` runner**, in the `aarch64` CI job: the
+same native list as above, and the two minimal-guest tests.
 
-In the minimal guest with the v9fs `kernel-v7.4-rc1` image:
-`gate1-aarch64-guest`, `native-aarch64-guest`, and
-`integration-aarch64-guest`.
+**Under emulation on an x86_64 machine**, in the Rocky aarch64 guest: the
+same two suites, with the login driver's limits stretched, and the package:
+`ROCKY_ARCH=aarch64 make rpm` and `make test-rpm`. The package builds
+(rpmlint reports no errors, and the allocator's conformance program passes
+in the package's check step), installs, and passes upstream's lifecycle
+test, which imports the Alpine and Rocky recipes, pulling their arm64
+images, starts and stops them, boots the packaged Rocky systemd recipe to a
+login, runs a Rocky workload with the packaged allocator preloaded, imports
+from the cache with networking off, and reinstalls and erases the package.
 
 The x86_64 side is unchanged in result: `make check`, `make test-unit` (174
 tests), the five integration tests, the Rocky x86_64 host suite, and a
@@ -394,19 +427,18 @@ What still separates the aarch64 daemon from the x86_64 one:
 
 - **Upstream does not support it.** The approved target is x86-64. Nothing
   here has been reviewed by upstream or accepted by a human reviewer.
-- **Hardware.** Only the integration tests have run on arm64 hardware (the
-  CI runner). The Rocky host suite, every instance test, systemd included,
-  and the package have run only under emulation on an x86_64 machine.
-- **Speed.** Not measured on hardware. Under emulation a systemd instance
-  reached its login in about 95 seconds on the aarch64 host and 28 on the
-  x86_64 one; the two emulations are not comparable, so this says little.
-  The aarch64 register translation spends six `ptrace` requests on a call
-  with both stops, x86-64 four.
+- **One arm64 machine.** The hardware results are from one Apple M1 and the
+  CI runner. No 64K-page kernel and no server-class arm64 CPU has run it.
+- **Speed.** One boot time on each architecture is all that was measured.
+  Upstream's benchmarks have not been run on aarch64; they need the package
+  and an x86_64 `sysbench` build that the guest setup names. The aarch64
+  register translation spends six `ptrace` requests on a call with both
+  stops, x86-64 four.
 - **Not run on aarch64:** the benchmarks, `test-allocator-rocky`,
-  `test-systemd-live`, `test-systemd-interactive` (its checks name
-  `x86_64` in `/proc/version`), `test-gate19-native-examples`, `run-host`,
-  and `test-rpm-metadata` (it needs `rpm` on the build machine, which this
-  one lacks).
+  `test-systemd-interactive` (its checks name `x86_64` in `/proc/version`),
+  `test-gate19-native-examples`, and `run-host`.
+- **`test-systemd-live` fails on both architectures here.** See "Upstream
+  defects this work ran into" below.
 - **Recipes in the tree name amd64 images.** The aarch64 package installs
   them naming arm64 ones. A recipe used straight from the tree on an
   aarch64 host has to be given the arm64 manifest from
@@ -415,7 +447,8 @@ What still separates the aarch64 daemon from the x86_64 one:
   and `pidfd_open` selector checks pass by construction (see the
   integration tests). `test-runtime` and `test-instance` interpret the
   x86-64 runtime fixture on either host; the aarch64 interpreter is covered
-  by `ginux-runtime`'s unit tests only.
+  by `ginux-runtime`'s unit tests only. A process that aborts dies of
+  `SIGTRAP` where it dies of `SIGSEGV` on x86-64.
 - **Contract names.** `access()`, `chmod()`, `readlink()` and `getpgrp()`
   reach the contract under the names in "Calls shown in their x86-64 form".
   A rule that names `syscall.access` matches nothing an aarch64 C library
@@ -426,7 +459,43 @@ What still separates the aarch64 daemon from the x86_64 one:
   epoll_event` (packed on x86-64 only) or the flags in `open_how` would
   need the same.
 - **The minimal guest** cannot run `test-launch`, `test-tracee-kill`, or
-  the daemon-tracing scripts; the Rocky guest and the CI runner do.
+  the daemon-tracing scripts; the Rocky guest, the CI runner, and an arm64
+  machine do.
+
+## Upstream defects this work ran into
+
+These are in shared code or upstream's tests, show on x86_64 too, and are
+not fixed here. Whether to report them upstream is the maintainer's call.
+
+- **`connect` with `AF_UNSPEC` is refused.** That call un-connects a
+  datagram socket. The native network mediation answers it with `EINVAL`.
+  glibc's `getaddrinfo` uses it between source-address probes; when the
+  host has an IPv6 route, the next probe leaves an IPv6 source on a socket
+  glibc expects to be IPv4-mapped, and glibc aborts on an internal
+  assertion (`getaddrinfo.c`, `IN6_IS_ADDR_V4MAPPED`). `dnf` dies resolving
+  its mirrors, so `test-systemd-live` fails. Seen on both architectures in
+  guests of QEMU 8.2 and 10.2, whose user networking provides IPv6.
+- **The contract has no `tgkill`.** `raise()` and so `abort()` cannot signal
+  the calling thread. See "A tracee's own trap".
+- **`close_range` flags.** Fixed in this tree; see gate record A6.
+- **One timing assumption in `test-native-supervision`.** The "shared
+  descriptor mutations are serialized" check gives a supervised thread one
+  million spin iterations to reach a blocked call. Under x86 emulation that
+  is not long enough and the check fails; it passes natively.
+- **Output shared between writers.** The supervisor's audit lines and a
+  workload's lines can interleave on one pipe, and a test that needs a line
+  whole can miss it. One x86_64 run of `test-native-close-range-gap` did.
+  The one case inside the daemon (its own lines against its tracee's) is
+  fixed here by ordering.
+- **`ginux start` of an instance whose init exits at once.** The package
+  lifecycle test starts an instance that runs `ls /` and expects the start
+  to succeed. Under KVM the workload has finished before the command checks
+  that it is running, and the command reports `failed to start`, although
+  the instance ran and its audit says `GINUX_NATIVE_CHECK: PASS`.
+  `make test-rpm` fails at that step on both architectures under KVM and
+  passes under emulation, where the workload is still running at the check.
+- **The pinned Rocky 10.2 x86_64 image URL** is intermittently unavailable
+  now that 10.3 is current. The vault has it.
 
 ## Bare-metal kernel
 

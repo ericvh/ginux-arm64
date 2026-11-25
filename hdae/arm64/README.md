@@ -85,6 +85,7 @@ rebased under it.
 
 ## Next gate, if the track continues
 
-What A8 left is in the "Known gaps" of `docs/arm64/README.md`. The items
-that need a machine this track has not had: the instance tests, the
-package, and a benchmark on arm64 hardware.
+What A8 left is in the "Known gaps" of `docs/arm64/README.md`: upstream's
+benchmarks on aarch64, a 64K-page kernel, and the targets that need the
+interactive host. The upstream defects it ran into are listed there too;
+the `AF_UNSPEC` one decides whether `test-systemd-live` can pass at all.
