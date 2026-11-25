@@ -7,9 +7,9 @@ fn main() {
         println!(
             "cargo:rustc-link-arg=-T{manifest}/../../tests/fixtures/managed-payload-aarch64.ld"
         );
-        // Keep the on-disk image inside the daemon's 64 KiB ELF buffer. The
-        // virtual addresses stay page-aligned for the loader.
+        // The kernel loads this image, and arm64 kernels run with 4K, 16K,
+        // or 64K pages: file offsets and addresses agree modulo the largest.
         println!("cargo:rustc-link-arg=-z");
-        println!("cargo:rustc-link-arg=max-page-size=4096");
+        println!("cargo:rustc-link-arg=max-page-size=65536");
     }
 }

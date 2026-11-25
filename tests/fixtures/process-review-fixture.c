@@ -106,6 +106,11 @@ __asm__(".global make_thread\nmake_thread:\n"
         "call thread_body\nxor %rdi,%rdi\nmov $60,%rax\nsyscall\n1: ret\n");
 #endif
 long probe_main(word *stack) {
+#if defined(__aarch64__)
+    // Where a page ends depends on the kernel: 4K, 16K, or 64K pages.
+    const word page_size=fixture_page_size(stack);
+    (void)page_size;
+#endif
     const char *self=((char **)(stack+1))[0];
     word last=0, i=0;
     while(self[i] && i<sizeof(exec_path)-32) {
@@ -372,7 +377,11 @@ long probe_main(word *stack) {
     // The last two bytes before the unmapped page after the bss: a status
     // word there crosses into memory the caller cannot write.
     extern char _end[];
+#if defined(__aarch64__)
+    word page_end=((word)_end+page_size-1)&~(page_size-1);
+#else
     word page_end=((word)_end+4095)&~(word)4095;
+#endif
     if(page_end-(word)_end<2)return 30;
     volatile unsigned char *edge=(volatile unsigned char *)(page_end-2);
     for(int round=0;round<2;round++) {
@@ -414,7 +423,11 @@ long probe_main(word *stack) {
     // (CLONE_PARENT_SETTID in the parent, CLONE_CHILD_SETTID in the child's
     // own copy), round 1 a thread. Both pointers name the same cell.
     extern char _end[];
+#if defined(__aarch64__)
+    word page_end=((word)_end+page_size-1)&~(page_size-1);
+#else
     word page_end=((word)_end+4095)&~(word)4095;
+#endif
     if(page_end-(word)_end<2)return 30;
     tid_edge=(volatile unsigned char *)(page_end-2);
     tid_edge[0]=0x77;

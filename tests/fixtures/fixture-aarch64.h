@@ -181,6 +181,17 @@ __attribute__((unused)) static long call_kept(long number, word *a, word *b, wor
     return result;
 }
 
+/* The kernel's page size, from the auxiliary vector above the environment
+ * on the initial stack. arm64 kernels run with 4K, 16K, or 64K pages. */
+__attribute__((unused)) static word fixture_page_size(const word *stack)
+{
+    const word *entry = stack + 1 + stack[0] + 1; /* argc, argv, null */
+    while (*entry) ++entry;                       /* environment */
+    for (++entry; entry[0]; entry += 2)
+        if (entry[0] == 6 /* AT_PAGESZ */) return entry[1];
+    return 4096;
+}
+
 /* gcc expands large aggregate initializers and copies into these. */
 __attribute__((used, optimize("no-tree-loop-distribute-patterns")))
 void *memset(void *target, int value, word count)
