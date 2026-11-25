@@ -475,3 +475,38 @@ test-native-supervision:
 	python3 scripts/test-native-close-range-gap.py $(GINUX) .artifacts/launch/native-fixture
 	python3 scripts/test-native-network-snapshot.py $(GINUX) .artifacts/launch/native-fixture
 	python3 scripts/test-native-unix-send-snapshot.py $(GINUX) .artifacts/launch/native-fixture
+
+# aarch64 port (this fork). See docs/arm64/README.md. Each binary targets one
+# architecture; `build` stays the x86_64 daemon and its x86_64 fixtures.
+ARM64_TARGET := aarch64-unknown-linux-gnu
+GINUX_ARM64 := target/$(ARM64_TARGET)/release/ginux
+QEMU_AARCH64 ?= qemu-aarch64-static
+
+.PHONY: build-arm64 check-arm64 arch-smoke arch-smoke-arm64 gate1-aarch64-guest gate1-x86_64-guest native-aarch64-guest legacy-kernel-aarch64 uefi-aarch64-guest
+
+build-arm64:
+	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo build -p ginux-init --target $(ARM64_TARGET) --release
+	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo build -p managed-payload --target $(ARM64_TARGET) --release
+
+check-arm64:
+	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo clippy -p ginux-init --bin ginux --target $(ARM64_TARGET) --release -- -D warnings
+	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo clippy -p managed-payload --bin managed-payload --target $(ARM64_TARGET) --release -- -D warnings
+
+arch-smoke: build
+	@./scripts/arch-smoke.sh $(GINUX) x86_64
+
+arch-smoke-arm64: build-arm64
+	@./scripts/arch-smoke.sh $(GINUX_ARM64) aarch64 $(QEMU_AARCH64)
+
+gate1-aarch64-guest: build-arm64
+	@./scripts/gate1-aarch64-guest.sh
+
+gate1-x86_64-guest: build
+	@./scripts/gate1-x86_64-guest.sh
+
+native-aarch64-guest: build-arm64
+	@./scripts/native-aarch64-guest.sh
+
+# The bare-metal kernel line is its own workspace under baremetal/.
+legacy-kernel-aarch64 uefi-aarch64-guest:
+	@$(MAKE) -C baremetal $@

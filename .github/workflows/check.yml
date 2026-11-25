@@ -79,3 +79,25 @@ jobs:
       - run: make test-process-native
       - run: sudo make test-gate1-setup
       - run: sudo make test-tracee-kill
+
+  # aarch64 port (this fork). The daemon is built and checked for aarch64,
+  # then run under a real arm64 kernel in a guest, because the supervision
+  # paths need ptrace and seccomp on that architecture.
+  aarch64:
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo apt-get update && sudo apt-get install -y qemu-system-arm cpio
+      - run: rustup component add clippy
+      - run: rustup target add aarch64-unknown-linux-gnu aarch64-unknown-none
+      - run: make build-arm64
+      - run: make check-arm64
+      # The runner is arm64, so the smoke test needs no emulator.
+      - run: make arch-smoke-arm64 QEMU_AARCH64=
+      - run: make legacy-kernel-aarch64
+      - name: Fetch the published v9fs arm64 kernel
+        run: curl -fsSL -o "$RUNNER_TEMP/Image" https://github.com/v9fs/test/releases/download/kernel-v7.4-rc1/Image
+      - run: GINUX_AARCH64_KERNEL="$RUNNER_TEMP/Image" make gate1-aarch64-guest
+      - run: GINUX_AARCH64_KERNEL="$RUNNER_TEMP/Image" make native-aarch64-guest
