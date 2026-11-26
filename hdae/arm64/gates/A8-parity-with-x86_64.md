@@ -19,8 +19,15 @@ listed under "Decisions that need review".
 ## Goal
 
 Everything upstream tests on x86_64 that can be run against the aarch64
-daemon is run against it, and what fails is fixed. What cannot be run, or
-was not, is named.
+daemon is run against it, and what fails there and passes on x86_64 is
+fixed. What cannot be run, or was not, is named. A test that fails the same
+way on both architectures is not a gap between them; those are under
+"Defects found outside the scope".
+
+The first sentence used to end "and what fails is fixed". It was made
+exact on 2026-11-26, when `test-systemd-live` turned out to fail
+identically on both architectures for reasons in upstream's contract. The
+human has not reviewed either wording.
 
 ## Scope
 
@@ -123,7 +130,10 @@ work ran into":
 
 - `dnf update` in an instance cannot unpack some packages, so
   `test-systemd-live` fails. The same five files fail with the same
-  errors on both architectures.
+  errors on both architectures. One cause is the contract's own: set-ID
+  modes are admitted only for paths on its `setuid` and `setgid` lists,
+  which upstream's recipes leave empty. Making the test pass means changing
+  what the contract admits.
 - The contract has no `tgkill`, so `abort()` cannot raise `SIGABRT`.
 - The catalog lacks x86-64's legacy `link` and `fchmodat` numbers. This one
   runs the other way: the calls work on aarch64 and get `ENOSYS` on x86_64.
@@ -165,6 +175,8 @@ Apple M1, and for x86_64 the Rocky 10.2 x86_64 guest on an AMD Threadripper
 | The same, on 64K pages | Rocky `kernel-64k` 6.12 in the emulated aarch64 guest | the same counts, and the host suite |
 | Upstream's Rocky host suite still passes | `make test-arm64`, KVM and emulated | `test-image` 8/8, `test-intercept`, `test-runtime`, `test-config`, `test-instance`, `test-gate12-cli`, `test-devices`, `test-process`, `test-kernel-views` |
 | Upstream's instance tests pass | `make test-instances-arm64`: KVM at upstream's time limits (under four minutes), and emulated with the login driver's limits stretched | `test-vfs`, `test-native-vfs`, `test-contract-runtime`, `test-gate125-lock`, `test-gate975-hooks`, `test-gate975-network`, `test-systemd`, `test-multi-instance` |
+| The suites and the instance tests on 16K pages | Rocky aarch64 guest on the M1's own 16K-page kernel (6.14 asahi), under KVM | the host suite, the twelve integration scripts with the same counts, and the eight instance tests |
+| The page-size faults cannot come back unnoticed | `test-page-size-arm64` natively on the 16K-page M1 and in the 64K-page guest, against the daemon from before the fixes and the current one; a build of aarch64 with a 16K snapshot spacing | the old daemon fails three of the four checks on 16K pages and all four on 64K; the current one passes on both, and in the 16K-page guest; the build with a 16K spacing stops at the assertion |
 | The instance tests on 64K pages | the emulated 64K-page guest | `test-vfs`, `test-native-vfs`, `test-contract-runtime`, `test-gate125-lock`, `test-gate975-hooks`, `test-gate975-network`, `test-systemd`, `test-multi-instance`; the last three only after the snapshot spacing and `getcwd` fixes |
 | The package builds and passes upstream's lifecycle test | `make test-rpm-arm64`, KVM and emulated; x86_64 `make test-rpm` under KVM | `Rocky Linux RPM build: PASS`, rpmlint 0 errors, `test-rpm-metadata: PASS`, `Rocky Linux RPM lifecycle: PASS` on both |
 | Upstream's remaining Rocky-host tests pass | KVM: `test-allocator-rocky-arm64`, `test-gate19-native-examples-arm64`, `test-systemd-interactive-arm64`; x86_64 `test-systemd-interactive` under KVM | pass; the interactive test, which drives `run-host`, passed 12 runs of 12 on aarch64 after the process-group fix and 8 of 8 on x86_64 |
@@ -184,10 +196,9 @@ Apple M1, and for x86_64 the Rocky 10.2 x86_64 guest on an AMD Threadripper
 
 - The arm64 hardware is one Apple M1 and the CI runner. The 64K-page
   results are from an emulated guest.
-- Page sizes other than 4K are covered thinly: the integration tests
-  natively on 16K, and everything on 64K in one emulated guest. No instance
-  test has run on a 16K-page host. Nothing in CI runs on either, so the
-  three page-size fixes have no regression test but that guest.
+- CI runs on 4K-page runners only. `test-page-size-arm64` is in the
+  aarch64 job, but there it cannot fail for a page-size reason; the 16K and
+  64K runs are made by hand.
 - The two machines compared are unlike. The figures show no aarch64 cost
   above x86_64's; they do not rank the architectures.
 - `test-systemd-live` does not pass on either architecture; see the

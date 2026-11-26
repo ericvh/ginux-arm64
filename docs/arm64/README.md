@@ -71,6 +71,14 @@ As root a workload drops to an unprivileged identity that must be able to
 reach the fixtures, so `test-process-native-arm64` runs without root in a
 private checkout, as upstream's CI runs it.
 
+One test is this port's own. `sudo make test-page-size-arm64` runs
+`tests/fixtures/page-size-fixture.c` as an instance's init and checks what
+depends on the host kernel's page size: `getcwd` with a buffer of one page,
+the virtual memory figures, and `clone3` and a send from a second task. On
+a 4K-page kernel it passes whatever the supervisor assumes, so it only
+means something on a 16K-page or 64K-page host; see "Page size". The
+Rocky-host runner includes it for aarch64.
+
 `build-fixtures-arm64` compiles upstream's C fixtures (`native-fixture.c`,
 `launch-fixture.c`, `gate1-setup-fixture.c`, `process-review-fixture.c`),
 the same sources the x86_64 targets compile, with `aarch64-linux-gnu-gcc`
@@ -440,6 +448,12 @@ wrong by a factor of 4 or 16 on the other arm64 kernels: on the 16K-page
 M1 a process of 17 pages reported 68. The architecture layer now reads the
 page size from the daemon's auxiliary vector (`arch::page_size`).
 
+`test-page-size-arm64` checks all three. Against the daemon from before
+these fixes it fails on `getcwd`, the memory figures, and the second
+task's `clone3` on the 16K-page M1, and on those and the second task's
+send in the 64K-page guest. Against the current daemon it passes on both.
+The spacing is also asserted when the daemon is built.
+
 ### What a tracer of the daemon sees
 
 Upstream's race tests ptrace the daemon and read the registers it stages for
@@ -478,6 +492,11 @@ On upstream `85d53265` (pull request #334).
   - The benchmarks: `bench-systemd-arm64`, `bench-block-arm64`,
     `bench-network-arm64`, `bench-baseline-arm64`, and `bench-modes-arm64`.
     Their figures are under "What supervision costs".
+
+**On a 16K-page kernel in a guest.** The M1's own kernel
+(`6.14.6-400.asahi.fc40.aarch64+16k`) installed into the Rocky aarch64
+guest, under KVM: the host suite, the twelve integration scripts with the
+same counts, `test-native-page-size`, and the eight instance tests.
 
 **On a 64K-page kernel.** Rocky's `kernel-64k`
 (`6.12.0-264.20.1.el10_3.aarch64+64k`) in the Rocky aarch64 guest, emulated
@@ -584,11 +603,12 @@ What still separates the aarch64 daemon from the x86_64 one:
 - **One arm64 machine.** The hardware results are from one Apple M1 and the
   CI runner, and the 64K-page results from an emulated guest. No
   server-class arm64 CPU has run it.
-- **Page sizes other than 4K are covered thinly.** The 16K results are the
-  integration tests run natively on the M1; the 64K results are one
-  emulated guest. No instance test has run on a 16K-page host, and nothing
-  in CI runs on either. Two of the three 4K assumptions found so far were
-  found by the 64K run, not by reading.
+- **CI runs on 4K pages only.** The 16K and 64K results are from runs made
+  by hand: natively and in a guest on the M1, and in an emulated guest.
+  `test-page-size-arm64` fails on those kernels if one of the three 4K
+  assumptions found so far comes back, and the build fails if the snapshot
+  spacing stops being page-aligned, but in CI that test runs on a 4K-page
+  runner, where it cannot fail for that reason.
 - **`test-systemd-live` fails on both architectures.** See "Upstream
   defects this work ran into" below.
 - **Recipes in the tree name amd64 images.** The aarch64 package installs
@@ -671,9 +691,14 @@ Not fixed here. Whether to report them upstream is the maintainer's call:
   such file or directory`). Two causes are visible. Only `fstat` results
   carry the instance's virtual owner; a lookup of the same file by path
   reports the host's, and rpm refuses a symbolic link whose owner differs
-  from its target's. And the contract's policy refuses a `chmod` to a
-  set-user-ID mode. The test also moves: it updates the pinned 10.2 image
-  against the mirrors of the day, which is now some two hundred packages.
+  from its target's. And a contract admits set-ID modes only for the paths
+  on its `setuid` and `setgid` lists, which upstream's recipes leave empty
+  by design, so `chmod` to a set-user-ID mode is refused. The test also
+  moves: it updates the pinned 10.2 image against the mirrors of the day,
+  which is now some two hundred packages, `util-linux` among them. Making
+  it pass means changing what upstream's contract admits. That is not a
+  difference between the architectures, and it is not this port's to
+  decide.
 - **The contract has no `tgkill`.** `raise()` and so `abort()` cannot signal
   the calling thread. See "A tracee's own trap".
 - **x86-64's legacy `link` and `fchmodat` are not in the catalog.** See
