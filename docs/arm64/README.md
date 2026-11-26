@@ -91,10 +91,12 @@ aarch64 CI job runs it.
 
 The same switch, `GINUX_AARCH64_SHARE=initrd`, lets
 `make integration-aarch64-guest` run on a distribution's kernel, and the
-guest runner unpacks an EFI zboot `vmlinuz` itself. The CI job runs that
-target too on a 64K-page kernel: `test-native-supervision` (42 checks),
-`test-gate1-setup`, and `test-process-native` (48). That kernel has to be
-newer than 6.8; see "Upstream defects this work ran into".
+guest runner unpacks an EFI zboot `vmlinuz` itself. The CI job runs
+`test-gate1-setup` and `test-process-native` (48 checks) that way on the
+64K-page kernel. `test-native-supervision` passes there too on a kernel
+newer than 6.8 (42 checks on Ubuntu's 7.0 64K-page kernel), but not
+reliably in a freshly booted guest, for a reason that has nothing to do
+with the page size; both are under "Upstream defects this work ran into".
 
 `build-fixtures-arm64` compiles upstream's C fixtures (`native-fixture.c`,
 `launch-fixture.c`, `gate1-setup-fixture.c`, `process-review-fixture.c`),
@@ -624,8 +626,8 @@ What still separates the aarch64 daemon from the x86_64 one:
   server-class arm64 CPU has run it.
 - **CI covers other page sizes in part.** On a 64K-page kernel the aarch64
   job runs the page-size test, which fails if one of the three 4K
-  assumptions found so far comes back, and the three of upstream's
-  integration scripts that a minimal guest can run. The build fails if the
+  assumptions found so far comes back, and two of upstream's integration
+  scripts. The build fails if the
   snapshot spacing stops being page-aligned. The Rocky host suite and the
   instance tests on 16K and 64K pages are runs made by hand: natively and
   in a guest on the M1, and in an emulated guest. They need a Rocky host,
@@ -726,8 +728,22 @@ Not fixed here. Whether to report them upstream is the maintainer's call:
   check that `waitid` releases reaped children fails on Ubuntu's 6.8
   kernel on both architectures: after 127 children the instance ends with
   `native virtual child failed`. It passes on every later kernel tried,
-  from 6.12, which is what upstream's Rocky host runs. Found while looking
-  for a 64K-page kernel that CI could boot.
+  from 6.12, which is what upstream's Rocky host runs. The supervisor
+  learns that a child was reaped from `POLLHUP` on the pidfd it holds; the
+  likely cause is that 6.8 does not report that yet, which has not been
+  checked. Found while looking for a 64K-page kernel that CI could boot.
+- **A virtual pid that equals a host pid.** For `waitid(P_PID, n)` the
+  supervisor looks for the task whose virtual pid is `n` or whose host pid
+  is `n`, the second so that a restarted call still matches, and takes the
+  first it finds. When a child's virtual pid equals the host pid of a task
+  earlier in the table, such as the caller's own, the kernel is asked
+  about the wrong process and answers `ECHILD`. Host pids are usually far
+  above virtual ones, so it takes a pid namespace or a freshly booted
+  guest to see it. Upstream's `null-wait` scenario then fails for about
+  one starting pid in three. On x86_64:
+  `sudo unshare --pid --fork --mount-proc` and run that scenario of
+  `test-native-supervision.py` as the first thing in the namespace. This
+  is what stopped `test-native-supervision` in the 64K-page guest in CI.
 - **x86-64's legacy `link` and `fchmodat` are not in the catalog.** See
   "Known gaps".
 - **One timing assumption in `test-native-supervision`.** The "shared

@@ -139,6 +139,12 @@ work ran into":
 - On Linux 6.8 upstream's check that `waitid` releases reaped children
   fails, on both architectures (Ubuntu's 6.8 kernel in a minimal guest).
   It passes from 6.12 on.
+- `waitid(P_PID, n)` selects the wrong task when a child's virtual pid
+  equals the host pid of another managed task, and returns `ECHILD`.
+  Reproduced on x86_64 in a pid namespace, where host pids are small:
+  upstream's `null-wait` scenario fails for about one starting pid in
+  three. It is why `test-native-supervision` is not in the 64K-page CI
+  step.
 - The catalog lacks x86-64's legacy `link` and `fchmodat` numbers. This one
   runs the other way: the calls work on aarch64 and get `ENOSYS` on x86_64.
 - One spin-count timing assumption in `test-native-supervision` fails under
@@ -200,8 +206,8 @@ Apple M1, and for x86_64 the Rocky 10.2 x86_64 guest on an AMD Threadripper
 
 - The arm64 hardware is one Apple M1 and the CI runner. The 64K-page
   results are from an emulated guest.
-- In CI the page-size test and the three integration scripts a minimal
-  guest can run are run on 64K pages. The Rocky host suite and the instance
+- In CI the page-size test and two of upstream's integration scripts are
+  run on 64K pages. The Rocky host suite and the instance
   tests on 16K and 64K pages are runs made by hand; they need a Rocky host,
   which CI boots for neither architecture.
 - The two machines compared are unlike. The figures show no aarch64 cost
