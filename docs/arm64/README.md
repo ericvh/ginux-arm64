@@ -201,12 +201,14 @@ The instance images are upstream's: `scripts/oci-common.sh` reads
 the arm64 manifests of the same pinned image indexes.
 `make instance-images-arm64` fetches and prepares them.
 
-The host is emulated on every machine (`start-rocky-host.sh` uses TCG, as
-upstream's does), and an emulated aarch64 host is slower than an emulated
-x86_64 one: systemd reached its login in about 95 seconds here against 28.
+The host is emulated unless `ROCKY_ACCEL=kvm` is set
+(`start-rocky-host.sh` uses TCG by default, as upstream's does), and an
+emulated aarch64 host is slower than an emulated x86_64 one: systemd
+reached its login in about 95 seconds here against 28.
 `GINUX_EXPECT_TIME_SCALE` (10 in this target) multiplies the login driver's
 50-second and 120-second limits. It is unset, and the limits are upstream's,
-in every x86_64 target.
+in every x86_64 target. Under KVM the limits need no stretching:
+`GINUX_EXPECT_TIME_SCALE=1`.
 
 An instance config names its root by image manifest, and upstream's files
 name the amd64 ones. The daemon treats that as an identity and the tests
@@ -217,12 +219,15 @@ arm64 manifest or the index.
 ### The package
 
 ```sh
-ROCKY_ARCH=aarch64 make rpm        # builds in the Rocky aarch64 guest
-ROCKY_ARCH=aarch64 make test-rpm   # installs it in a fresh one and uses it
+make rpm-arm64        # builds in the Rocky aarch64 guest
+make test-rpm-arm64   # checks its metadata, installs it in a fresh guest, and uses it
 ```
 
-The spec builds the runtime for the package's own architecture. The build
-runs inside the emulated guest and takes about an hour there.
+These are `ROCKY_ARCH=aarch64 make rpm`, `test-rpm-metadata`, and
+`test-rpm`. The spec builds the runtime for the package's own
+architecture. The build runs inside the guest: about an hour emulated, and
+between one and a half and three minutes with `ROCKY_ACCEL=kvm` on an arm64
+machine.
 
 The example recipes name each image by its `linux/amd64` manifest.
 `config/examples/arm64-manifests` lists the `linux/arm64` manifest of each
@@ -233,9 +238,24 @@ host can run. `docker.io/jrei/systemd-ubuntu`, which
 that recipe has no arm64 image, and `test-rpm` runs its Ubuntu step on
 x86_64 only. The recipes in the tree are upstream's, unchanged.
 
-The Rocky-host targets not covered are the benchmarks,
-`test-allocator-rocky`, `test-gate19-native-examples`, `run-host`,
-`test-systemd-live`, and `test-systemd-interactive`.
+### The other Rocky-host targets
+
+Each of upstream's remaining Rocky-host targets has an `-arm64` target that
+runs the same script against the aarch64 daemon or package:
+
+| Target | Upstream's target |
+|--------|-------------------|
+| `test-allocator-rocky-arm64` | `test-allocator-rocky`: the allocator built and checked on Rocky |
+| `test-gate19-native-examples-arm64` | `test-gate19-native-examples`: the packaged Alpine and Rocky recipes imported and run. The Ubuntu recipe has no arm64 image and is skipped. |
+| `test-systemd-interactive-arm64` | `test-systemd-interactive`: `run-host`'s script driven from a terminal, the package installed and a systemd instance used from its shell |
+| `run-host-arm64` | `run-host`: the same host, left at a shell |
+| `test-systemd-live-arm64` | `test-systemd-live`: `dnf update` in a systemd instance against the live mirrors |
+| `bench-prepare-arm64`, `bench-baseline-arm64`, `bench-modes-arm64` | the sysbench baseline and the dispatch-mode matrix |
+| `bench-block-arm64`, `bench-network-arm64`, `bench-systemd-arm64` | the device and boot benchmarks |
+
+The benchmark host and the interactive test's host have their own files for
+aarch64 (`build/gate11-host-aarch64-*`, `build/rocky-test-host-aarch64-*`),
+as the other hosts do.
 
 The original branch for this (`cursor/arm64-rocky-guest-2b05`) made
 `make test` itself boot the aarch64 guest and copied the binaries from a
@@ -289,13 +309,36 @@ argument, and has no separate `orig_rax`. The translation therefore:
   Kernels before the tracer's `x0` became authoritative for the restart
   already pass the caller's own value, and nothing is changed there.
 
+The translation needs to know what kind of stop it is reading: a call's
+entry, its exit, a seccomp stop, or none of these. x86-64 code reads that
+from the wait status and `rax`. The aarch64 layer is given the status too:
+`supervisor::wait` and the native loops pass each one to
+`arch::after_wait`, which is a no-op on x86-64. A seccomp stop is an event
+in the status. A syscall stop is `SIGTRAP` with bit 7, and the kernel marks
+its side in `x7` (0 at the entry, 1 at the exit). At the first stop of a
+call `x8` is still the number the tracee issued, and at an exit the number
+comes from the entry's record. The kernel is asked
+(`PTRACE_GET_SYSCALL_INFO`) only where the status does not settle it: a
+plain `SIGTRAP`, a seccomp stop that follows an entry stop (a tracer may
+have changed the number there), or a stop whose status the layer was not
+given.
+
 The registers read at a stop are kept until the tracee can run again, so a
 write does not read them a second time: the daemon's `ptrace` wrapper tells
 the architecture layer about every request, and any request but a read or
-write of a stopped tracee forgets them. The syscall number comes with the
-stop kind (`PTRACE_GET_SYSCALL_INFO`) at an entry, and from the entry's
-record at an exit. A call with both stops costs six `ptrace` requests, where
-x86-64 spends four.
+write of a stopped tracee forgets them, and the status with them.
+
+Together these leave the aarch64 supervisor making the requests the x86-64
+one makes, plus one where it changes a call's number, which is a register
+set of its own on arm64 (`NT_ARM_SYSTEM_CALL`). Counted with `strace` over
+four scenarios of the native supervision test (`fork`, `descriptors`,
+`many-reap`, `host-info`), which stop 104 times on either architecture:
+
+| | `ptrace` requests |
+|---|---:|
+| x86_64 | 258 |
+| aarch64, asking the kernel at every stop | 357 |
+| aarch64, from the wait status | 269 |
 
 Three argument encodings differ between the ABIs and are converted in both
 directions: `clone` takes `tls` before `child_tid`; `O_DIRECTORY`,
@@ -357,6 +400,11 @@ both architectures. The process then dies of `SIGSEGV` on x86-64 and of
 `SIGTRAP` on aarch64. Before this rule it took the whole instance with it
 on aarch64.
 
+The two signals are the C library's, not the daemon's. Outside any
+instance, a program that installs a seccomp filter failing `tgkill` with
+`ENOSYS` and calls `abort()` is killed by signal 11 on x86-64 and by signal
+5 on aarch64, on the two machines themselves and in the Rocky guests.
+
 ### Page size
 
 arm64 kernels run with 4K, 16K, or 64K pages. The daemon and the C fixtures
@@ -364,6 +412,33 @@ are linked for 64K. The aarch64 managed payload is too: it was linked for
 4K while the daemon interpreted it, and faulted when a 16K-page kernel
 loaded it. The process fixture reads the page size from the auxiliary
 vector where it needs the end of a page.
+
+Three things in shared code assumed 4K pages, which only an arm64 kernel
+can contradict. Two were found by running upstream's tests on Rocky's
+64K-page kernel, and the third by reading the code after that.
+
+The supervisor copies the arguments of `connect`, `bind`, the sends, and
+`clone3` into a private read-only mapping in the tracee, at a fixed address
+for the task's slot. The network slots were 16K apart and the `clone3`
+slots 4K apart. A fixed mapping must start on a page boundary, so on a
+64K-page kernel three network slots in four could not be mapped, and on a
+16K-page kernel three `clone3` slots in four; the tracee's call came back
+`EINVAL`. journald announces itself to PID 1 with such a send, so on the
+64K-page kernel systemd in an instance waited for journald until it timed
+out. The slots are now at least `arch::MAX_PAGE_SIZE` apart: that is 4K on
+x86-64, where nothing moves, and 64K on aarch64.
+
+`getcwd` was refused for a buffer above 4096 bytes. A C library's
+`getcwd(NULL, 0)` asks with `PATH_MAX` or one page, whichever is larger,
+so on 16K and 64K kernels Bash could not find its working directory. The
+bound is now the larger of 4096 and the page size.
+
+The virtual memory figures (`/proc/<pid>/statm` and `status`,
+`/proc/meminfo`, the cgroup's `memory.current`) turn the kernel's page
+counts into bytes. They did it with 4096, which is right on x86-64 and
+wrong by a factor of 4 or 16 on the other arm64 kernels: on the 16K-page
+M1 a process of 17 pages reported 68. The architecture layer now reads the
+page size from the daemon's auxiliary vector (`arch::page_size`).
 
 ### What a tracer of the daemon sees
 
@@ -387,58 +462,118 @@ On upstream `85d53265` (pull request #334).
   checks), all eight `test-native-supervision` scripts (57),
   `test-gate1-setup` (3), `test-tracee-kill` (5), `test-process-native`
   (48), `make test-unit`, and `test-allocator-linux`.
-- In the Rocky Linux 10.2 aarch64 guest under KVM (kernel 6.12, 4K pages):
-  `make test-arm64` in 145 seconds and `make test-instances-arm64` in 261
-  seconds, both at upstream's own time limits. That is `test-image`, the
-  host suite, the twelve integration scripts, `test-vfs`,
-  `test-native-vfs`, `test-contract-runtime`, `test-gate125-lock`,
-  `test-gate975-hooks`, `test-gate975-network`, `test-systemd`, and
-  `test-multi-instance`.
-- `ROCKY_ARCH=aarch64 ROCKY_ACCEL=kvm make rpm` builds the package in 164
-  seconds, and `test-rpm-metadata` passes on it. `make test-rpm` passes up
-  to the step described under "Upstream defects this work ran into" and
-  fails there, as the x86_64 package does under KVM.
-- A systemd instance reached its login in 3.3 seconds there. On an x86_64
-  machine (AMD Threadripper 1950X) with the Rocky x86_64 guest under KVM it
-  took 3.4 and 3.9 seconds. The machines differ, so this compares nothing
-  finer than the order of magnitude.
-- Upstream's sysbench baseline (`bench-prepare`, then
-  `collect-gate11-baseline.sh`) ran on both, each in its Rocky guest under
-  KVM with 4 vCPUs, selective dispatch, one-second runs, three repetitions.
-  The figure is the instance's rate over the native rate on the same host,
-  as the range across the five vCPU and thread combinations:
+- In the Rocky Linux 10.2 aarch64 guest under KVM (kernel 6.12, 4K pages),
+  every one at upstream's own time limits:
+  - `make test-arm64` in under two minutes and `make test-instances-arm64`
+    in under four. That is `test-image`, the host suite, the twelve
+    integration scripts, `test-vfs`, `test-native-vfs`,
+    `test-contract-runtime`, `test-gate125-lock`, `test-gate975-hooks`,
+    `test-gate975-network`, `test-systemd`, and `test-multi-instance`.
+  - `make test-rpm-arm64`: the package builds in about a minute and a half
+    (rpmlint reports no errors), `test-rpm-metadata` passes, and upstream's
+    lifecycle test passes.
+  - `test-allocator-rocky-arm64`, `test-gate19-native-examples-arm64`, and
+    `test-systemd-interactive-arm64`, which drives `run-host`'s script end
+    to end.
+  - The benchmarks: `bench-systemd-arm64`, `bench-block-arm64`,
+    `bench-network-arm64`, `bench-baseline-arm64`, and `bench-modes-arm64`.
+    Their figures are under "What supervision costs".
 
-  | Workload | x86_64 (Threadripper 1950X) | aarch64 (Apple M1) |
-  |----------|-----------------------------|--------------------|
-  | cpu | 0.99x to 1.02x | 0.99x to 1.07x |
-  | memory | 0.99x to 1.02x | 1.00x to 1.15x |
-  | threads | 0.91x to 1.02x | 0.85x to 0.94x |
-  | mutex | 0.75x to 1.15x | 0.65x to 1.27x |
-
-  Compute-bound work is at native speed on both. `threads`, which is a
-  storm of contended locks and so of supervised calls, loses about five to
-  nine percent on x86_64 and six to fifteen on aarch64. `mutex` varied by
-  up to a quarter between repetitions on both and shows nothing. The runs
-  are short and the M1 mixes two kinds of core, so treat the third row as
-  a direction, not a measurement.
+**On a 64K-page kernel.** Rocky's `kernel-64k`
+(`6.12.0-264.20.1.el10_3.aarch64+64k`) in the Rocky aarch64 guest, emulated
+on an x86_64 machine, because the M1 cannot run 64K-page guests: the host
+suite and all twelve integration scripts pass with the same counts, and so
+do the instance tests: `test-vfs`, `test-native-vfs`,
+`test-contract-runtime`, `test-gate125-lock`, `test-gate975-hooks`,
+`test-gate975-network`, `test-systemd`, and `test-multi-instance`. The
+last three boot systemd in an instance, which did not get past journald at
+first; see "Page size". The same kernel build with 4K pages
+(`6.12.0-264.20.1.el10_3`) passes `test-systemd` on both architectures
+under KVM.
 
 **On GitHub's `ubuntu-24.04-arm` runner**, in the `aarch64` CI job: the
 same native list as above, and the two minimal-guest tests.
 
 **Under emulation on an x86_64 machine**, in the Rocky aarch64 guest: the
-same two suites, with the login driver's limits stretched, and the package:
-`ROCKY_ARCH=aarch64 make rpm` and `make test-rpm`. The package builds
-(rpmlint reports no errors, and the allocator's conformance program passes
-in the package's check step), installs, and passes upstream's lifecycle
-test, which imports the Alpine and Rocky recipes, pulling their arm64
-images, starts and stops them, boots the packaged Rocky systemd recipe to a
-login, runs a Rocky workload with the packaged allocator preloaded, imports
-from the cache with networking off, and reinstalls and erases the package.
+two suites, with the login driver's limits stretched, and the package
+(`make rpm-arm64`, `make test-rpm-arm64`).
 
-The x86_64 side is unchanged in result: `make check`, `make test-unit` (174
-tests), the five integration tests, the Rocky x86_64 host suite, and a
-systemd instance on the Rocky x86_64 host all pass with the shared-code
-changes. The x86_64 C fixtures compile to the same binaries as upstream's.
+**The x86_64 side** is unchanged in result: `make check`, `make test-unit`
+(174 tests), the five integration tests (69, 57, 3, 5, and 48 checks), the
+Rocky x86_64 host suite, and a systemd instance on the Rocky x86_64 host
+all pass with the shared-code changes. The x86_64 C fixtures compile to the
+same binaries as upstream's.
+
+### Beside x86_64
+
+The same targets on the Rocky x86_64 guest under KVM on an AMD Threadripper
+1950X, and on the Rocky aarch64 guest under KVM on the M1. The machines
+differ, so the figures compare nothing finer than the order of magnitude.
+
+| | x86_64 | aarch64 |
+|---|---|---|
+| `test-systemd-interactive` | passes, 8 runs of 8 | passes, 12 runs of 12; before the process-group fix below it failed 6 runs of 19 |
+| Package lifecycle (`test-rpm`) | passes | passes |
+| `test-systemd-live` | fails: `dnf update` cannot unpack five packages | fails on the same five files with the same errors |
+| Systemd instance, boot to login (`bench-systemd`) | 3540 ms | 2446 ms and 2592 ms in two runs |
+| Block device model (`bench-block`) | 942 ns per operation | 291 ns and 1448 ns |
+| Network device model (`bench-network`) | 527 ns per operation | 1267 ns and 1616 ns |
+
+The two device rows measure the M1's two kinds of core more than anything
+else. Each is a short single-threaded loop in the daemon, the same code on
+both architectures, and the guest's virtual CPU lands on a performance core
+or an efficiency core. Run natively, the network loop takes 502 ns per
+operation on the Threadripper, 351 ns on an M1 performance core, and 798 ns
+on an M1 efficiency core; the block loop takes about 1060 ns, 430 ns, and
+1100 to 1750 ns.
+
+### What supervision costs
+
+**Requests.** The aarch64 supervisor makes the `ptrace` requests the
+x86-64 one makes, plus one where it changes a call's number. The count is
+under "What the aarch64 translation has to reconstruct".
+
+**One supervised call.** `getppid` 200,000 times as the init of
+`ginux native` with `config/instance-gate5.toml` (paranoid dispatch, every
+call audited), the daemon and the workload on one CPU:
+
+| | Natively | Supervised |
+|---|---:|---:|
+| Threadripper 1950X | 0.17 µs | 32 µs |
+| M1 performance core | 0.13 µs | 12.6 µs (13.0 µs before the wait-status change) |
+
+**Upstream's dispatch-mode matrix** (`bench-modes`: sysbench for five
+seconds, five repetitions, with 1, 2, and 4 vCPUs). The figure is the
+instance's rate over the native rate on the same guest, as the range across
+the five vCPU and thread combinations:
+
+| Workload | x86_64, selective | aarch64, selective | x86_64, paranoid | aarch64, paranoid |
+|----------|---|---|---|---|
+| cpu | 0.998x to 1.002x | 0.997x to 1.000x | 0.989x to 1.001x | 0.998x to 1.005x |
+| memory | 0.991x to 1.003x | 0.956x to 1.007x | 0.980x to 1.000x | 0.991x to 1.185x |
+| threads | 0.923x to 0.943x | 0.901x to 0.913x | 0.019x to 0.092x | 0.033x to 0.171x |
+| mutex | 0.866x to 1.078x | 0.917x to 1.138x | 0.820x to 1.096x | 0.941x to 1.083x |
+
+Compute-bound work is at native speed on both. `mutex` varies between
+repetitions on both and shows nothing.
+
+`threads` under selective dispatch looks like an aarch64 deficit and is
+not one. Each of its events is a thousand `sched_yield` calls, and
+selective dispatch lets that one call through in the kernel: the supervisor
+never sees it. What the row measures is what a seccomp filter adds to a
+call. Per yield:
+
+| | Natively | In an instance | Added | With a bare seccomp filter, no daemon | Added |
+|---|---:|---:|---:|---:|---:|
+| x86_64 guest | 295 ns | 320 ns | 25 ns | 282 ns to 306 ns | 24 ns |
+| aarch64 guest | 252 ns | 278 ns | 25 ns | 230 ns to 255 ns | 26 ns |
+
+The fourth and fifth columns are a program that times the call, installs a
+filter of the shape the daemon installs, and times it again, in the same
+guests. The kernel adds the same 25 nanoseconds on both; the M1's yield is
+quicker to begin with, so the same cost is a larger share of it. Under
+paranoid dispatch the yield goes to the supervisor, and there it costs 2.8
+to 16 microseconds on the Threadripper and 1.2 to 7.6 on the M1.
 
 ## Known gaps
 
@@ -447,32 +582,37 @@ What still separates the aarch64 daemon from the x86_64 one:
 - **Upstream does not support it.** The approved target is x86-64. Nothing
   here has been reviewed by upstream or accepted by a human reviewer.
 - **One arm64 machine.** The hardware results are from one Apple M1 and the
-  CI runner. No 64K-page kernel and no server-class arm64 CPU has run it.
-- **Speed.** A supervised call costs more on aarch64: the register
-  translation spends six `ptrace` requests on a call with both stops, where
-  x86-64 spends four, and upstream's `threads` benchmark shows it (see
-  "Verified"). One short run on one machine of each architecture is all
-  that was measured; `bench-systemd`, `bench-block`, `bench-network`, and
-  the dispatch-mode matrix have not been run on aarch64.
-- **Not run on aarch64:** `test-allocator-rocky`,
-  `test-systemd-interactive` (its checks name `x86_64` in `/proc/version`),
-  `test-gate19-native-examples`, and `run-host`.
-- **`test-systemd-live` fails on both architectures here.** See "Upstream
+  CI runner, and the 64K-page results from an emulated guest. No
+  server-class arm64 CPU has run it.
+- **Page sizes other than 4K are covered thinly.** The 16K results are the
+  integration tests run natively on the M1; the 64K results are one
+  emulated guest. No instance test has run on a 16K-page host, and nothing
+  in CI runs on either. Two of the three 4K assumptions found so far were
+  found by the 64K run, not by reading.
+- **`test-systemd-live` fails on both architectures.** See "Upstream
   defects this work ran into" below.
 - **Recipes in the tree name amd64 images.** The aarch64 package installs
   them naming arm64 ones. A recipe used straight from the tree on an
   aarch64 host has to be given the arm64 manifest from
-  `config/examples/arm64-manifests`. The Ubuntu example has no arm64 image.
+  `config/examples/arm64-manifests`. The Ubuntu example has no arm64 image,
+  so the Ubuntu steps of `test-rpm` and `test-gate19-native-examples` run
+  on x86_64 only.
 - **Checks that cannot be the same.** `int80` does not exist. The `kill`
   and `pidfd_open` selector checks pass by construction (see the
   integration tests). `test-runtime` and `test-instance` interpret the
   x86-64 runtime fixture on either host; the aarch64 interpreter is covered
   by `ginux-runtime`'s unit tests only. A process that aborts dies of
-  `SIGTRAP` where it dies of `SIGSEGV` on x86-64.
+  `SIGTRAP` where it dies of `SIGSEGV` on x86-64, as it does outside an
+  instance (see "A tracee's own trap").
 - **Contract names.** `access()`, `chmod()`, `readlink()` and `getpgrp()`
   reach the contract under the names in "Calls shown in their x86-64 form".
   A rule that names `syscall.access` matches nothing an aarch64 C library
   issues, as a rule that names `syscall.faccessat` would not on x86-64.
+- **Two calls work on aarch64 and not on x86-64.** The catalog lacks
+  x86-64's legacy `link` and `fchmodat` numbers, so the calls an x86-64 C
+  library issues for `link()` and for `fchmodat()` without flags get
+  `ENOSYS` there. An aarch64 C library issues `linkat`, and its `fchmodat`
+  is shown as `fchmodat2`; both are cataloged.
 - **Structures.** `struct stat` is the only structure the supervisor reads
   or writes in a tracee's memory whose layout differs between the ABIs, and
   it is converted. A future supervisor path that touched `struct
@@ -482,38 +622,70 @@ What still separates the aarch64 daemon from the x86_64 one:
   the daemon-tracing scripts; the Rocky guest, the CI runner, and an arm64
   machine do.
 
+Speed is not on this list. Nothing measured shows the aarch64 daemon
+costing more than the x86_64 one; see "What supervision costs".
+
 ## Upstream defects this work ran into
 
-These are in shared code or upstream's tests, show on x86_64 too, and are
-not fixed here. Whether to report them upstream is the maintainer's call.
+These are in shared code or upstream's tests and show on x86_64 too.
 
-- **`connect` with `AF_UNSPEC` is refused.** That call un-connects a
-  datagram socket. The native network mediation answers it with `EINVAL`.
-  glibc's `getaddrinfo` uses it between source-address probes; when the
-  host has an IPv6 route, the next probe leaves an IPv6 source on a socket
-  glibc expects to be IPv4-mapped, and glibc aborts on an internal
-  assertion (`getaddrinfo.c`, `IN6_IS_ADDR_V4MAPPED`). `dnf` dies resolving
-  its mirrors, so `test-systemd-live` fails. Seen on both architectures in
-  guests of QEMU 8.2 and 10.2, whose user networking provides IPv6.
+Fixed in this tree, because each stood between an upstream test and any
+result on either architecture:
+
+- **`connect` with `AF_UNSPEC` was refused.** That call dissolves a
+  datagram socket's association. The native network mediation answered it
+  with `EINVAL`. glibc's `getaddrinfo` uses it between source-address
+  probes; when the host has an IPv6 route, the next probe left an IPv6
+  source on a socket glibc expects to be IPv4-mapped, and glibc aborted on
+  an internal assertion. `dnf` died resolving its mirrors. A UDP socket may
+  now dissolve its association, through the same snapshot of the address
+  the other calls use.
+- **`ginux start` of an instance whose init exits at once.** The package
+  lifecycle test starts an instance that runs `ls /` and expects the start
+  to succeed. Under KVM the workload had finished before the helper looked
+  for it, and the helper reported `failed to start`. It now accepts an
+  instance that has finished with status 0. `make test-rpm` passes under
+  KVM on both architectures.
+- **A dead child's process group.** The emulated `setpgid` updates the
+  console broker's PID map and failed the instance when the entry was
+  missing. A task that has exited has left that map but stays in the
+  process table until it is reaped, and a shell with job control sets its
+  child's group after every fork. On the M1 this ended
+  `test-systemd-interactive` in about one run in three; on the slower
+  x86_64 machine it did not show in eight runs. The update is now skipped
+  for a task that has exited.
+- **`close_range` flags.** See gate record A6.
+- **Output shared between writers, inside the daemon.** The supervisor's
+  two status lines could be split by its tracee's first line. They now go
+  out before the tracee is resumed.
+
+Not fixed here. Whether to report them upstream is the maintainer's call:
+
+- **`dnf update` cannot unpack some packages in an instance**, so
+  `test-systemd-live` fails. With name resolution working the update runs,
+  and five files fail to unpack, the same five with the same errors on
+  both architectures: `/lib64/libgcc_s-14-20260724.so.1` (`Unsafe
+  symlink`), `/usr/bin/mount` and `/usr/bin/chfn` (`chmod failed -
+  Operation not permitted`), `/usr/sbin/pam_timestamp_check` (`chmod
+  failed - Directory not empty`), and `/usr/bin/chage` (`chmod failed - No
+  such file or directory`). Two causes are visible. Only `fstat` results
+  carry the instance's virtual owner; a lookup of the same file by path
+  reports the host's, and rpm refuses a symbolic link whose owner differs
+  from its target's. And the contract's policy refuses a `chmod` to a
+  set-user-ID mode. The test also moves: it updates the pinned 10.2 image
+  against the mirrors of the day, which is now some two hundred packages.
 - **The contract has no `tgkill`.** `raise()` and so `abort()` cannot signal
   the calling thread. See "A tracee's own trap".
-- **`close_range` flags.** Fixed in this tree; see gate record A6.
+- **x86-64's legacy `link` and `fchmodat` are not in the catalog.** See
+  "Known gaps".
 - **One timing assumption in `test-native-supervision`.** The "shared
   descriptor mutations are serialized" check gives a supervised thread one
   million spin iterations to reach a blocked call. Under x86 emulation that
   is not long enough and the check fails; it passes natively.
-- **Output shared between writers.** The supervisor's audit lines and a
-  workload's lines can interleave on one pipe, and a test that needs a line
-  whole can miss it. One x86_64 run of `test-native-close-range-gap` did.
-  The one case inside the daemon (its own lines against its tracee's) is
-  fixed here by ordering.
-- **`ginux start` of an instance whose init exits at once.** The package
-  lifecycle test starts an instance that runs `ls /` and expects the start
-  to succeed. Under KVM the workload has finished before the command checks
-  that it is running, and the command reports `failed to start`, although
-  the instance ran and its audit says `GINUX_NATIVE_CHECK: PASS`.
-  `make test-rpm` fails at that step on both architectures under KVM and
-  passes under emulation, where the workload is still running at the check.
+- **Output shared between writers, in the tests.** The supervisor's audit
+  lines and a workload's lines can interleave on one pipe, and a test that
+  needs a line whole can miss it. One x86_64 run of
+  `test-native-close-range-gap` did.
 - **The pinned Rocky 10.2 x86_64 image URL** is intermittently unavailable
   now that 10.3 is current. The vault has it.
 

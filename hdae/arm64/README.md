@@ -85,7 +85,10 @@ rebased under it.
 
 ## Next gate, if the track continues
 
-What A8 left is in the "Known gaps" of `docs/arm64/README.md`: upstream's
-benchmarks on aarch64, a 64K-page kernel, and the targets that need the
-interactive host. The upstream defects it ran into are listed there too;
-the `AF_UNSPEC` one decides whether `test-systemd-live` can pass at all.
+What A8 left is in the "Known gaps" of `docs/arm64/README.md`. None of it
+is a known difference in behaviour between the two daemons. What remains is
+coverage (a server-class arm64 machine, a 16K-page host for the instance
+tests, kernels with other page sizes in CI) and decisions that are the
+human's: the trap rule, the three shared-code fixes, and whether to report
+the upstream defects, among them the ones that keep `test-systemd-live`
+from passing on either architecture.
