@@ -89,6 +89,13 @@ The run fails unless the guest reports `GINUX_PAGE_SIZE`-byte pages (65536
 by default). It takes about fifteen seconds under emulation, and the
 aarch64 CI job runs it.
 
+The same switch, `GINUX_AARCH64_SHARE=initrd`, lets
+`make integration-aarch64-guest` run on a distribution's kernel, and the
+guest runner unpacks an EFI zboot `vmlinuz` itself. The CI job runs that
+target too on a 64K-page kernel: `test-native-supervision` (42 checks),
+`test-gate1-setup`, and `test-process-native` (48). That kernel has to be
+newer than 6.8; see "Upstream defects this work ran into".
+
 `build-fixtures-arm64` compiles upstream's C fixtures (`native-fixture.c`,
 `launch-fixture.c`, `gate1-setup-fixture.c`, `process-review-fixture.c`),
 the same sources the x86_64 targets compile, with `aarch64-linux-gnu-gcc`
@@ -615,13 +622,14 @@ What still separates the aarch64 daemon from the x86_64 one:
 - **One arm64 machine.** The hardware results are from one Apple M1 and the
   CI runner, and the 64K-page results from an emulated guest. No
   server-class arm64 CPU has run it.
-- **CI covers other page sizes with one test.** The aarch64 job runs the
-  page-size test on a 64K-page kernel, which fails if one of the three 4K
-  assumptions found so far comes back, and the build fails if the snapshot
-  spacing stops being page-aligned. The suites and the instance tests on
-  16K and 64K pages are runs made by hand: natively and in a guest on the
-  M1, and in an emulated guest. A fourth assumption of that kind would
-  show there and not in CI.
+- **CI covers other page sizes in part.** On a 64K-page kernel the aarch64
+  job runs the page-size test, which fails if one of the three 4K
+  assumptions found so far comes back, and the three of upstream's
+  integration scripts that a minimal guest can run. The build fails if the
+  snapshot spacing stops being page-aligned. The Rocky host suite and the
+  instance tests on 16K and 64K pages are runs made by hand: natively and
+  in a guest on the M1, and in an emulated guest. They need a Rocky host,
+  which upstream's CI does not boot for x86_64 either.
 - **`test-systemd-live` fails on both architectures.** See "Upstream
   defects this work ran into" below.
 - **Recipes in the tree name amd64 images.** The aarch64 package installs
@@ -714,6 +722,12 @@ Not fixed here. Whether to report them upstream is the maintainer's call:
   decide.
 - **The contract has no `tgkill`.** `raise()` and so `abort()` cannot signal
   the calling thread. See "A tracee's own trap".
+- **On Linux 6.8 a reaped child does not free its place.** Upstream's
+  check that `waitid` releases reaped children fails on Ubuntu's 6.8
+  kernel on both architectures: after 127 children the instance ends with
+  `native virtual child failed`. It passes on every later kernel tried,
+  from 6.12, which is what upstream's Rocky host runs. Found while looking
+  for a 64K-page kernel that CI could boot.
 - **x86-64's legacy `link` and `fchmodat` are not in the catalog.** See
   "Known gaps".
 - **One timing assumption in `test-native-supervision`.** The "shared
