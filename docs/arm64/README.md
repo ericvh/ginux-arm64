@@ -79,6 +79,16 @@ a 4K-page kernel it passes whatever the supervisor assumes, so it only
 means something on a 16K-page or 64K-page host; see "Page size". The
 Rocky-host runner includes it for aarch64.
 
+`make page-size-aarch64-guest` runs it where it does mean something: in
+the minimal guest on a kernel with 64K pages, such as the `vmlinuz` of
+Ubuntu's `linux-image-unsigned-*-generic-64k` package
+(`GINUX_AARCH64_KERNEL`, with `GINUX_AARCH64_ROOTFS` as above). A
+distribution's kernel has 9p only as a module, so for this target the
+guest carries the daemon, the fixture, and the script in its initramfs.
+The run fails unless the guest reports `GINUX_PAGE_SIZE`-byte pages (65536
+by default). It takes about fifteen seconds under emulation, and the
+aarch64 CI job runs it.
+
 `build-fixtures-arm64` compiles upstream's C fixtures (`native-fixture.c`,
 `launch-fixture.c`, `gate1-setup-fixture.c`, `process-review-fixture.c`),
 the same sources the x86_64 targets compile, with `aarch64-linux-gnu-gcc`
@@ -452,7 +462,9 @@ page size from the daemon's auxiliary vector (`arch::page_size`).
 these fixes it fails on `getcwd`, the memory figures, and the second
 task's `clone3` on the 16K-page M1, and on those and the second task's
 send in the 64K-page guest. Against the current daemon it passes on both.
-The spacing is also asserted when the daemon is built.
+The spacing is also asserted when the daemon is built. CI runs the test on
+Ubuntu's 64K-page kernel (`make page-size-aarch64-guest`), where the old
+daemon fails all four checks as well.
 
 ### What a tracer of the daemon sees
 
@@ -603,12 +615,13 @@ What still separates the aarch64 daemon from the x86_64 one:
 - **One arm64 machine.** The hardware results are from one Apple M1 and the
   CI runner, and the 64K-page results from an emulated guest. No
   server-class arm64 CPU has run it.
-- **CI runs on 4K pages only.** The 16K and 64K results are from runs made
-  by hand: natively and in a guest on the M1, and in an emulated guest.
-  `test-page-size-arm64` fails on those kernels if one of the three 4K
+- **CI covers other page sizes with one test.** The aarch64 job runs the
+  page-size test on a 64K-page kernel, which fails if one of the three 4K
   assumptions found so far comes back, and the build fails if the snapshot
-  spacing stops being page-aligned, but in CI that test runs on a 4K-page
-  runner, where it cannot fail for that reason.
+  spacing stops being page-aligned. The suites and the instance tests on
+  16K and 64K pages are runs made by hand: natively and in a guest on the
+  M1, and in an emulated guest. A fourth assumption of that kind would
+  show there and not in CI.
 - **`test-systemd-live` fails on both architectures.** See "Upstream
   defects this work ran into" below.
 - **Recipes in the tree name amd64 images.** The aarch64 package installs
