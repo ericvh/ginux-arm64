@@ -3,7 +3,9 @@
 # arm64 Linux guest under qemu-system-aarch64. On an arm64 host the same
 # scripts run directly: `make test-integration-arm64`.
 #
-#   GINUX_AARCH64_KERNEL   arm64 Linux Image with virtio-9p built in.
+#   GINUX_AARCH64_KERNEL   arm64 Linux Image with virtio-9p built in. An
+#                          EFI zboot image, which is what some
+#                          distributions ship as vmlinuz, is unpacked.
 #   GINUX_AARCH64_SHARE    `initrd` puts the daemon, fixtures, and scripts
 #                          in the initramfs instead of sharing them over
 #                          9p, for a kernel that has 9p only as a module,
@@ -49,6 +51,26 @@ share=$work/share
 tree=$work/rootfs
 log=$work/console.log
 mkdir -p "$share" "$tree"
+
+# QEMU loads a plain or gzip-compressed Image, and an EFI zboot image only
+# for some compressions. Take the Image out of a zboot image here: its
+# header gives the payload's offset, size, and compression.
+if [ "$(dd if="$kernel" bs=1 skip=4 count=4 2>/dev/null)" = zimg ]; then
+    python3 - "$kernel" "$work/Image" <<'UNPACK'
+import struct
+import subprocess
+import sys
+
+data = open(sys.argv[1], "rb").read()
+offset, size = struct.unpack_from("<II", data, 8)
+kind = data[24:32].rstrip(b"\0").decode()
+tool = {"gzip": "gzip", "zstd": "zstd", "xz": "xz", "lz4": "lz4"}[kind]
+image = subprocess.run([tool, "-dc"], input=data[offset:offset + size],
+                       stdout=subprocess.PIPE, check=True).stdout
+open(sys.argv[2], "wb").write(image)
+UNPACK
+    kernel=$work/Image
+fi
 
 # One command per test, in the order given. The share mirrors the paths of
 # this tree, so the scripts find config/ beside scripts/ as they do here.
