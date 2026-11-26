@@ -491,7 +491,7 @@ ARM64_LAUNCH := .artifacts/launch-arm64
 ARM64_FIXTURE_BASE_CFLAGS := -nostdlib -static -fno-stack-protector -fno-builtin -O2 -mno-outline-atomics -I$(ARM64_LAUNCH)
 ARM64_FIXTURE_CFLAGS := $(ARM64_FIXTURE_BASE_CFLAGS) -Wall -Wextra -Werror
 
-.PHONY: build-arm64 check-arm64 arch-smoke arch-smoke-arm64 gate1-aarch64-guest gate1-x86_64-guest native-aarch64-guest legacy-kernel-aarch64 uefi-aarch64-guest build-launch-fixture-arm64 build-gate1-fixture-arm64 build-process-fixtures-arm64 build-fixtures-arm64 test-native-supervision-arm64 test-launch-arm64 test-gate1-setup-arm64 test-tracee-kill-arm64 test-process-native-arm64 test-integration-arm64 native-suite-aarch64-guest integration-aarch64-guest build-arm64-host-suite host-image-fetch-arm64 test-arm64 instance-images-arm64 test-instances-arm64 rpm-arm64 test-rpm-arm64 test-allocator-rocky-arm64 test-gate19-native-examples-arm64 test-systemd-interactive-arm64 test-systemd-live-arm64 run-host-arm64 bench-prepare-arm64 bench-baseline-arm64 bench-modes-arm64 bench-block-arm64 bench-network-arm64 bench-systemd-arm64
+.PHONY: build-arm64 check-arm64 arch-smoke arch-smoke-arm64 gate1-aarch64-guest gate1-x86_64-guest native-aarch64-guest legacy-kernel-aarch64 uefi-aarch64-guest build-launch-fixture-arm64 build-gate1-fixture-arm64 build-process-fixtures-arm64 build-fixtures-arm64 test-native-supervision-arm64 test-launch-arm64 test-gate1-setup-arm64 test-tracee-kill-arm64 test-process-native-arm64 test-integration-arm64 native-suite-aarch64-guest integration-aarch64-guest build-arm64-host-suite host-image-fetch-arm64 test-arm64 instance-images-arm64 test-instances-arm64 rpm-arm64 test-rpm-arm64 test-allocator-rocky-arm64 test-gate19-native-examples-arm64 test-systemd-interactive-arm64 test-systemd-live-arm64 run-host-arm64 bench-prepare-arm64 bench-baseline-arm64 bench-modes-arm64 bench-block-arm64 bench-network-arm64 bench-systemd-arm64 test-page-size-arm64
 
 build-arm64:
 	RUSTFLAGS='$(FREESTANDING_RUSTFLAGS)' cargo build -p ginux-init --target $(ARM64_TARGET) --release
@@ -530,6 +530,7 @@ build-launch-fixture-arm64:
 	./scripts/aarch64-syscall-header.sh > $(ARM64_LAUNCH)/syscall-map-aarch64.h
 	$(ARM64_CC) $(ARM64_FIXTURE_CFLAGS) tests/fixtures/launch-fixture.c -o $(ARM64_LAUNCH)/launch-fixture
 	$(ARM64_CC) $(ARM64_FIXTURE_CFLAGS) tests/fixtures/native-fixture.c -o $(ARM64_LAUNCH)/native-fixture
+	$(ARM64_CC) $(ARM64_FIXTURE_CFLAGS) tests/fixtures/page-size-fixture.c -o $(ARM64_LAUNCH)/page-size-fixture
 	$(ARM64_CC) $(ARM64_FIXTURE_CFLAGS) -DCLONE_SNAPSHOT_COLLISION -Wl,--section-start=.ginux_clone_collision=0x600000000000 tests/fixtures/native-fixture.c -o $(ARM64_LAUNCH)/native-clone-collision-fixture
 
 build-gate1-fixture-arm64: build-launch-fixture-arm64
@@ -560,6 +561,11 @@ test-native-supervision-arm64:
 	python3 scripts/aarch64-trace.py scripts/test-native-close-range-gap.py $(GINUX_ARM64) $(ARM64_LAUNCH)/native-fixture
 	python3 scripts/aarch64-trace.py scripts/test-native-network-snapshot.py $(GINUX_ARM64) $(ARM64_LAUNCH)/native-fixture
 	python3 scripts/aarch64-trace.py scripts/test-native-unix-send-snapshot.py $(GINUX_ARM64) $(ARM64_LAUNCH)/native-fixture
+
+# What depends on the host kernel's page size. arm64 kernels have 4K, 16K,
+# or 64K pages; this means something on the last two.
+test-page-size-arm64:
+	python3 scripts/test-native-page-size.py $(GINUX_ARM64) $(ARM64_LAUNCH)/page-size-fixture
 
 test-launch-arm64:
 	python3 scripts/test-launch.py $(GINUX_ARM64) $(ARM64_LAUNCH)/launch-fixture

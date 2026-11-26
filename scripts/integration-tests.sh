@@ -22,6 +22,9 @@ integration_command() {
             echo "python3 scripts/test-process-native.py $2/ginux $5 $2/process-native-fixture" ;;
         supervision)
             echo "python3 scripts/test-native-supervision.py $2/ginux $3/native-fixture" ;;
+        page-size)
+            # aarch64 only: see tests/fixtures/page-size-fixture.c.
+            echo "python3 scripts/test-native-page-size.py $2/ginux $3/page-size-fixture" ;;
         clone-snapshot)
             echo "python3 scripts/aarch64-trace.py scripts/test-native-clone-snapshot.py $2/ginux $3/native-fixture $3/native-clone-collision-fixture" ;;
         *)

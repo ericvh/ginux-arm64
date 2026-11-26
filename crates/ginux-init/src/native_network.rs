@@ -23,6 +23,7 @@ const STRIDE: u64 = if SNAPSHOT_SIZE as u64 > MAX_PAGE_SIZE {
     MAX_PAGE_SIZE
 };
 const END: u64 = BASE + 128 * STRIDE;
+const _: () = assert!((BASE | STRIDE) & (MAX_PAGE_SIZE - 1) == 0);
 const MAX_MESSAGES: usize = 16;
 const MAX_IOV: usize = 16;
 const MAX_CONTROL: usize = 4096;

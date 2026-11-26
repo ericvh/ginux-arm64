@@ -114,6 +114,7 @@ jobs:
       - run: make build-fixtures-arm64
       - run: sudo make test-launch-arm64
       - run: sudo make test-native-supervision-arm64
+      - run: sudo make test-page-size-arm64
       - run: make test-process-native-arm64
       - run: sudo make test-gate1-setup-arm64
       - run: sudo make test-tracee-kill-arm64

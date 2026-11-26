@@ -24,6 +24,8 @@ remote=/opt/ginux-integration
 
 if [ "$#" -eq 0 ]; then
     set -- $integration_default
+    # Page sizes other than 4K exist only on arm64, and so does this test.
+    [ "$ROCKY_ARCH" = x86_64 ] || set -- "$@" page-size
 fi
 for file in "$GINUX_RELEASE/ginux" "$GINUX_RELEASE/managed-payload" \
     "$GINUX_RELEASE/process-native-fixture" "$launch/native-fixture" \

@@ -16,6 +16,7 @@ const STRIDE: u64 = if PAGE > MAX_PAGE_SIZE {
     MAX_PAGE_SIZE
 };
 const END: u64 = BASE + 128 * STRIDE;
+const _: () = assert!((BASE | STRIDE) & (MAX_PAGE_SIZE - 1) == 0);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
