@@ -23,8 +23,10 @@ integration_command() {
         supervision)
             echo "python3 scripts/test-native-supervision.py $2/ginux $3/native-fixture" ;;
         page-size)
-            # aarch64 only: see tests/fixtures/page-size-fixture.c.
-            echo "python3 scripts/test-native-page-size.py $2/ginux $3/page-size-fixture" ;;
+            # aarch64 only: see tests/fixtures/page-size-fixture.c. With
+            # GINUX_PAGE_SIZE set, the host under test must have that page
+            # size, so a run meant for 16K or 64K pages cannot pass on 4K.
+            echo "python3 scripts/test-native-page-size.py $2/ginux $3/page-size-fixture ${GINUX_PAGE_SIZE:-}" ;;
         clone-snapshot)
             echo "python3 scripts/aarch64-trace.py scripts/test-native-clone-snapshot.py $2/ginux $3/native-fixture $3/native-clone-collision-fixture" ;;
         *)

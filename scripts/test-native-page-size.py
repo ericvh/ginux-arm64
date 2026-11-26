@@ -16,9 +16,10 @@ import tempfile
 
 
 def main():
-    if len(sys.argv) != 3 or os.geteuid() != 0:
-        sys.exit("usage (as root): test-native-page-size.py <ginux> <page-size fixture>")
-    binary, fixture = (Path(arg).resolve() for arg in sys.argv[1:])
+    if len(sys.argv) not in (3, 4) or os.geteuid() != 0:
+        sys.exit("usage (as root): test-native-page-size.py <ginux> <page-size fixture>"
+                 " [the page size this host must have]")
+    binary, fixture = (Path(arg).resolve() for arg in sys.argv[1:3])
     template = (Path(__file__).resolve().parent.parent / "config/instance-gate5.toml").read_text()
     page = os.sysconf("SC_PAGE_SIZE")
 
@@ -67,6 +68,10 @@ sys_read = ["/"]
             raise RuntimeError(f"{name}: exit={proc.returncode} page={page}\n{output}")
         print(f"PASS native {name}")
 
+    if len(sys.argv) == 4:
+        # A run that is meant to be on other than 4K pages says so, and
+        # does not pass on a host that is not.
+        check(f"the host has {sys.argv[3]}-byte pages", str(page) == sys.argv[3])
     check("the instance sees the host's page size",
           proc.returncode == 0 and reported.get("page-size") == str(page))
     check("getcwd takes a buffer of one page", reported.get("getcwd-page") == "1")

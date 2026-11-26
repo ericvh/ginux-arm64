@@ -115,6 +115,21 @@ jobs:
       - run: sudo make test-launch-arm64
       - run: sudo make test-native-supervision-arm64
       - run: sudo make test-page-size-arm64
+      # The runner has 4K pages, where that test passes whatever the
+      # supervisor assumes. Run it again in a guest on Ubuntu's 64K-page
+      # kernel, with a Python root filesystem for the test script.
+      - name: Fetch a 64K-page arm64 kernel and a root filesystem with Python
+        working-directory: ${{ runner.temp }}
+        run: |
+          apt-get download linux-image-unsigned-6.8.0-31-generic-64k
+          echo "a706d1a8cfb2928c24563923f352bfb17fbef9f1ee2f0da7a5e916fa30cfedfd  linux-image-unsigned-6.8.0-31-generic-64k_6.8.0-31.31_arm64.deb" | sha256sum -c
+          dpkg-deb -x linux-image-unsigned-6.8.0-31-generic-64k_6.8.0-31.31_arm64.deb kernel-64k
+          docker pull -q python:3.13-alpine
+          docker export "$(docker create python:3.13-alpine)" -o arm64-rootfs.tar
+      - run: >-
+          GINUX_AARCH64_KERNEL="$RUNNER_TEMP/kernel-64k/boot/vmlinuz-6.8.0-31-generic-64k"
+          GINUX_AARCH64_ROOTFS="$RUNNER_TEMP/arm64-rootfs.tar"
+          make page-size-aarch64-guest
       - run: make test-process-native-arm64
       - run: sudo make test-gate1-setup-arm64
       - run: sudo make test-tracee-kill-arm64

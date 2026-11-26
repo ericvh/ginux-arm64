@@ -4,6 +4,10 @@
 # scripts run directly: `make test-integration-arm64`.
 #
 #   GINUX_AARCH64_KERNEL   arm64 Linux Image with virtio-9p built in.
+#   GINUX_AARCH64_SHARE    `initrd` puts the daemon, fixtures, and scripts
+#                          in the initramfs instead of sharing them over
+#                          9p, for a kernel that has 9p only as a module,
+#                          as a distribution's does. The default is 9p.
 #   GINUX_AARCH64_ROOTFS   tar archive of an arm64 root filesystem that has
 #                          /bin/sh and python3, for example
 #                          `docker export` of python:3-alpine for linux/arm64.
@@ -87,7 +91,7 @@ mount -t sysfs sys /sys
 mount -t devtmpfs dev /dev 2>/dev/null
 mount -t tmpfs -o mode=1777 tmp /tmp
 ip link set lo up 2>/dev/null || ifconfig lo 127.0.0.1 up
-if mount -t 9p -o trans=virtio,version=9p2000.L,msize=262144 hostshare /share; then
+if [ -f /share/run.sh ] || mount -t 9p -o trans=virtio,version=9p2000.L,msize=262144 hostshare /share; then
     sh /share/run.sh </dev/null
     echo "GINUX_GUEST_STATUS: $?"
 else
@@ -97,6 +101,10 @@ sync
 poweroff -f
 INIT
 chmod 755 "$tree/init"
+if [ "${GINUX_AARCH64_SHARE:-9p}" = initrd ]; then
+    mkdir -p "$tree/share"
+    cp -R "$share/." "$tree/share/"
+fi
 (cd "$tree" && find . | cpio -o -H newc -R 0:0 2>/dev/null) > "$work/initrd.cpio"
 
 set +e
