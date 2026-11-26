@@ -9785,8 +9785,14 @@ fn supervise_native(
                         .unwrap_or_else(|| {
                             native_fail(instance, pid, b"native process group task missing")
                         });
+                    // A child that has exited keeps its place in the process
+                    // table until it is reaped, and its parent may still set
+                    // its group, as a shell with job control does after every
+                    // fork. It has left the broker's map, so there is nothing
+                    // there to update.
                     if !pid_map
                         .update_process_group(changed_supervisor.host_pid, task_view.process_group)
+                        && changed_supervisor.tracing
                     {
                         native_fail(instance, pid, b"native process group PID map update failed");
                     }
