@@ -41,8 +41,9 @@ say an isolation unit is a "domain" they predate upstream's rename to
 | `gates/A7-rocky-host-suite.md` | none | Review of the fifteen original branches; upstream's host suite on Rocky 10 aarch64 |
 | `gates/A8-parity-with-x86_64.md` | none | Upstream's integration and instance tests on aarch64, and the faults they found |
 
-A6, A7 and A8 were written on `arm64/main`, after the rebase below. None of
-the eight was accepted by a human reviewer. They stay open.
+A6, A7 and A8 were written on `arm64/main`, after the rebase below. A8 was
+accepted by the human on 2026-11-26 and is closed. The other seven were not
+accepted by a human reviewer and stay open.
 
 ## Rebase onto current upstream (2026-11-25)
 
@@ -86,9 +87,8 @@ rebased under it.
 ## Next gate, if the track continues
 
 What A8 left is in the "Known gaps" of `docs/arm64/README.md`. None of it
-is a known difference in behaviour between the two daemons. What remains is
-coverage (a server-class arm64 machine, a 16K-page host for the instance
-tests, kernels with other page sizes in CI) and decisions that are the
-human's: the trap rule, the three shared-code fixes, and whether to report
-the upstream defects, among them the ones that keep `test-systemd-live`
-from passing on either architecture.
+is a known difference in behaviour between the two daemons that the human
+wants closed. What remains is coverage: a server-class arm64 machine, and
+the Rocky host suite and instance tests on 16K and 64K pages anywhere but
+by hand. The upstream defects A8 ran into are listed in that document;
+none has been reported upstream.

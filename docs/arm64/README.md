@@ -620,7 +620,8 @@ to 16 microseconds on the Threadripper and 1.2 to 7.6 on the M1.
 What still separates the aarch64 daemon from the x86_64 one:
 
 - **Upstream does not support it.** The approved target is x86-64. Nothing
-  here has been reviewed by upstream or accepted by a human reviewer.
+  here has been reviewed by upstream. The fork's maintainer accepted the
+  parity work (gate record A8) on 2026-11-26.
 - **One arm64 machine.** The hardware results are from one Apple M1 and the
   CI runner, and the 64K-page results from an emulated guest. No
   server-class arm64 CPU has run it.
@@ -702,7 +703,8 @@ result on either architecture:
   two status lines could be split by its tracee's first line. They now go
   out before the tracee is resumed.
 
-Not fixed here. Whether to report them upstream is the maintainer's call:
+Not fixed here, by the maintainer's decision of 2026-11-26. None has been
+reported upstream:
 
 - **`dnf update` cannot unpack some packages in an instance**, so
   `test-systemd-live` fails. With name resolution working the update runs,

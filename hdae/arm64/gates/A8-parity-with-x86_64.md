@@ -13,22 +13,21 @@ of that goal against the gaps it had listed. It has not been reviewed.
 The goal was set as a standing condition on the session, with the
 instruction not to pause for direction until it held. So the work below ran
 without the checkpoints this process otherwise asks for, including the
-shared-code fixes under "Shared faults fixed here". Each such choice is
-listed under "Decisions that need review".
+shared-code fixes under "Shared faults fixed here". Each such choice was
+put to the human at the end; see "Decisions, and the human's answers".
 
 ## Goal
 
 Everything upstream tests on x86_64 that can be run against the aarch64
-daemon is run against it, and what fails is fixed. What cannot be run, or
-was not, is named.
+daemon is run against it, and what fails there and passes on x86_64 is
+fixed. What cannot be run, or was not, is named. A test that fails the same
+way on both architectures is not a gap between them; those are under
+"Defects found outside the scope".
 
-As written, this is not met for one test. `test-systemd-live` fails, and it
-fails identically on x86_64, for reasons in upstream's contract (see
-"Defects found outside the scope"). On 2026-11-26 the agent reworded the
-goal to cover only failures that x86_64 does not share, and then put the
-original back: narrowing a goal is the human's decision, not the agent's.
-Its recommendation is that narrowing, because a test that fails the same
-way on both architectures is not a gap between them.
+The first sentence used to end "and what fails is fixed", which
+`test-systemd-live` does not meet: it fails identically on both
+architectures for reasons in upstream's contract. The human chose this
+wording on 2026-11-26.
 
 ## Scope
 
@@ -107,21 +106,31 @@ machines lost, which happens to be the arm64 one.
 | `ginux start` reported `failed to start` for an instance whose init had already exited with status 0 when the command looked for it. | `make test-rpm` under KVM, both architectures (emulation was slow enough to hide it) | The start helper accepts an instance that has finished with status 0. |
 | The emulated `setpgid` failed the whole instance when the console broker's PID map had no entry for the task. A task that has exited has left that map but is still in the process table. | `test-systemd-interactive` under KVM on the M1: 6 failures in 19 runs. 8 runs of 8 passed on the x86_64 guest. | The update is skipped for a task that has exited; 12 runs of 12 then passed. That the task involved is a dead child is read from the code and from that result, not captured. |
 
-## Decisions that need review
+## Decisions, and the human's answers
+
+Asked on 2026-11-26, after the work, and answered the same day.
 
 **The three shared-code fixes above.** They change what the x86_64 daemon
-and its helper do. They were made without the corrective-gate proposal this
-process asks for when a defect is found outside a gate's scope. The human
-may want them reported upstream, kept here, or taken out.
+and its helper do, and were made without the corrective-gate proposal this
+process asks for when a defect is found outside a gate's scope. Answer:
+keep them.
 
-**The trap rule.** It is a choice, not a translation. Upstream fails an instance
-closed at a tracee's own breakpoint trap, and its test asserts that. On
-aarch64 the same signal also covers what x86-64 reports as `SIGILL` and
-`SIGSEGV`, so applying the rule to every `brk` made any aborting process
-fatal to its instance. The agent chose to deliver `brk` with a nonzero
-immediate and keep `brk #0` fatal. The alternative is to keep every `brk`
-fatal and accept that difference. The rule is one function,
-`arch::abort_trap`.
+**The trap rule.** It is a choice, not a translation. Upstream fails an
+instance closed at a tracee's own breakpoint trap, and its test asserts
+that. On aarch64 the same signal also covers what x86-64 reports as
+`SIGILL` and `SIGSEGV`, so applying the rule to every `brk` made any
+aborting process fatal to its instance. The agent chose to deliver `brk`
+with a nonzero immediate and keep `brk #0` fatal; the rule is one function,
+`arch::abort_trap`. Answer: keep it.
+
+**`test-systemd-live`.** It fails the same way on both architectures.
+Answer: leave it, as outside the gap; the goal above says so.
+
+**x86-64's legacy `link` and `fchmodat`.** The calls work on aarch64 and
+get `ENOSYS` on x86_64. Answer: leave the x86_64 daemon as upstream's.
+
+**The `waitid` selector defect.** Shared code, reproduced on x86_64.
+Answer: leave it documented and unfixed.
 
 ## Defects found outside the scope
 
@@ -153,8 +162,8 @@ work ran into":
   whole-line assertion in a test.
 - The pinned Rocky 10.2 x86_64 image URL is intermittently unavailable.
 
-Whether to report any of them upstream, or to fix them in this tree, is the
-human's decision.
+The human's decision on 2026-11-26 was to leave them as they are here.
+Reporting them upstream was not asked for and has not been done.
 
 ## Audit of the listed code gaps
 
@@ -233,4 +242,5 @@ Apple M1, and for x86_64 the Rocky 10.2 x86_64 guest on an AMD Threadripper
 
 ## Review
 
-Open. Not accepted by a human reviewer.
+Accepted by the human on 2026-11-26, with the answers above. This record is
+closed; later work on the track belongs in a new one.
